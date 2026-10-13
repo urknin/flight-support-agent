@@ -11,7 +11,8 @@
     "db:seed": "node --loader tsx src/db/seed.ts",
     "test": "node --import tsx --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "postinstall": "node scripts/patch-workers-ai.js"
   },
   "dependencies": {
     "@cloudflare/ai-chat": "^0.12.1",
