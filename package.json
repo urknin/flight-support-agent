@@ -1,0 +1,28 @@
+{
+  "name": "flight-support-agent",
+  "version": "1.0.0",
+  "description": "AI-powered flight disruption and rebooking customer support agent on Cloudflare",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute flight-support-db --local --file=./schema.sql",
+    "db:seed": "node --loader tsx src/db/seed.ts",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types"
+  },
+  "dependencies": {
+    "@cloudflare/ai-chat": "^0.12.1",
+    "agents": "^0.28.1",
+    "ai": "^7.0.139",
+    "workers-ai-provider": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261013.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.150.0"
+  }
+}

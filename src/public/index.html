@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AeroCare AI • Autonomous Flight Disruption & Rebooking Agent</title>
+  <meta name="description" content="AI-powered flight disruption customer support agent built on Cloudflare Agents, Workers AI, Durable Objects, and Workflows." />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <div class="logo-badge">
+      <div class="logo-icon">✈</div>
+      <div class="logo-text">
+        <h1>AeroCare AI Support</h1>
+        <span>Cloudflare Agents SDK • Llama 3.3 • Durable Objects • Workflows</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-open-notifications" class="btn-secondary" title="View SMS and Email Outbox">
+        📬 Alerts Outbox (<span id="notif-count">0</span>)
+      </button>
+      <button id="btn-simulate-disruption" class="btn-primary" title="Trigger simulated convective thunderstorm & FAA Ground Stop">
+        ⚡ Simulate Storm Delay
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="app-container">
+    <!-- Left Sidebar: Flight Board & Live Conditions -->
+    <aside class="sidebar">
+      <!-- Active Flight Card -->
+      <section class="card" id="flight-card">
+        <div class="card-title">
+          <span>Active Passenger Booking</span>
+          <span id="booking-badge" style="font-family: var(--font-mono); color: var(--cf-orange);">SKY-8842</span>
+        </div>
+        <div class="flight-hero">
+          <div>
+            <div class="flight-number" id="card-flight-number">AA1822</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);" id="card-airline">American Airlines</div>
+          </div>
+          <span class="status-badge status-delayed" id="card-status-badge">DELAYED</span>
+        </div>
+        <div class="route-display">
+          <div class="route-point">
+            <div class="route-code" id="card-origin-code">DFW</div>
+            <div class="route-city" id="card-origin-city">Dallas</div>
+          </div>
+          <div class="route-arrow">✈ ➔</div>
+          <div class="route-point">
+            <div class="route-code" id="card-dest-code">ORD</div>
+            <div class="route-city" id="card-dest-city">Chicago</div>
+          </div>
+        </div>
+        <div class="flight-meta-grid">
+          <div class="meta-item">
+            <span>Passenger</span>
+            <strong id="card-passenger-name">Alex Mercer</strong>
+          </div>
+          <div class="meta-item">
+            <span>Seat</span>
+            <strong id="card-seat">14B</strong>
+          </div>
+          <div class="meta-item">
+            <span>Scheduled Departure</span>
+            <strong id="card-sched-dep">14:30 UTC</strong>
+          </div>
+          <div class="meta-item">
+            <span>Estimated Departure</span>
+            <strong id="card-est-dep" style="color: var(--status-delayed);">17:15 UTC</strong>
+          </div>
+        </div>
+      </section>
+
+      <!-- Airport Weather & FAA Advisory Widget -->
+      <section class="card" id="weather-card">
+        <div class="card-title">
+          <span>Airport Conditions (DFW)</span>
+          <span id="weather-live-tag" style="color: #10b981; font-size: 0.7rem;">● LIVE FEED</span>
+        </div>
+        <div class="weather-box">
+          <div class="weather-header">
+            <div class="weather-temp" id="weather-temp">22°C</div>
+            <div style="font-size: 0.8rem; font-weight: 600; color: #f59e0b;" id="weather-severity">⚠️ ADVISORY</div>
+          </div>
+          <div class="weather-desc" id="weather-desc">
+            Severe Convective Thunderstorms with Heavy Rain & Gusting Winds
+          </div>
+          <div class="weather-stats">
+            <div>💨 Gusts: <strong id="weather-wind">68 km/h</strong></div>
+            <div>💧 Humidity: <strong id="weather-humidity">88%</strong></div>
+          </div>
+        </div>
+        <div class="faa-alert-banner" id="faa-banner">
+          <span style="font-size: 1.1rem;">🛑</span>
+          <div>
+            <strong>FAA Ground Stop in Effect (DFW)</strong>
+            <div style="font-size: 0.75rem; margin-top: 0.2rem;" id="faa-details">
+              Convective Weather / Thunderstorm Line. Traffic Management Program active.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Disruption Simulator Toolbar -->
+      <section class="card">
+        <div class="card-title">
+          <span>Reviewer Quick Actions</span>
+        </div>
+        <div class="sim-controls">
+          <button class="sim-btn" id="btn-quick-dfw">🌩 Trigger DFW Ground Stop & Severe Storm</button>
+          <button class="sim-btn" id="btn-quick-restore">🌤 Clear Weather & Restore Flight to On-Time</button>
+        </div>
+      </section>
+    </aside>
+
+    <!-- Right Area: Interactive Agent Chat -->
+    <section class="chat-container">
+      <div class="chat-header">
+        <div class="agent-status-indicator">
+          <div class="status-dot"></div>
+          <span>AeroCare AI Assistant • Llama 3.3 Connected</span>
+        </div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">
+          Session: <strong style="color: var(--text-main);">SKY-8842</strong>
+        </div>
+      </div>
+
+      <div class="messages-scroll" id="messages-container">
+        <!-- Initial Welcome Message -->
+        <div class="message-row agent">
+          <div class="message-avatar avatar-agent">AI</div>
+          <div class="message-bubble">
+            Hello Alex, I'm your AeroCare Flight Support Assistant. 
+            <br><br>
+            I see your booking <strong>SKY-8842</strong> on flight <strong>AA1822</strong> from Dallas (DFW) to Chicago (ORD) is currently delayed due to severe thunderstorms and an FAA Ground Stop.
+            <br><br>
+            How can I assist you today? I can explain the weather delays, help you rebook onto an alternative flight, or set up text/email alerts for status changes.
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Action Prompt Chips -->
+      <div class="quick-prompts">
+        <button class="prompt-chip" data-prompt="Why is my flight AA1822 delayed?">🔍 Why is my flight delayed?</button>
+        <button class="prompt-chip" data-prompt="Find me alternative flights to Chicago with open seats.">✈️ Find alternative flights</button>
+        <button class="prompt-chip" data-prompt="Rebook me onto flight AA2040.">🎟 Rebook to AA2040</button>
+        <button class="prompt-chip" data-prompt="Please text me updates at +15125550199 if anything changes.">📱 Text me updates (+1 512-555-0199)</button>
+      </div>
+
+      <!-- Chat Input Form -->
+      <form class="chat-input-bar" id="chat-form">
+        <input 
+          type="text" 
+          id="chat-input" 
+          placeholder="Type your message or request rebooking..." 
+          autocomplete="off" 
+          required 
+        />
+        <button type="submit" id="btn-send">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- Dispatched Alerts Drawer Modal -->
+  <div class="modal-overlay" id="notif-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-size: 1rem;">📬 Dispatched Outbox Alerts</h3>
+        <button id="btn-close-modal" style="background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer;">✕</button>
+      </div>
+      <div class="modal-body" id="notif-list">
+        <p style="color: var(--text-muted); font-size: 0.85rem;">No alerts dispatched yet. Subscribe to flight updates or click 'Simulate Storm Delay' to trigger alerts.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

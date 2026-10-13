@@ -1,0 +1,46 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flight-support-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  "assets": {
+    "directory": "./src/public",
+    "binding": "ASSETS"
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SupportAgent",
+        "class_name": "SupportAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SupportAgent"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "flight-support-db",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "flight-watcher",
+      "binding": "FLIGHT_WATCHER",
+      "class_name": "FlightWatcherWorkflow"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "development"
+  }
+}
