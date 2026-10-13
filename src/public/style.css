@@ -450,6 +450,66 @@ header {
   color: #fef3c7;
 }
 
+/* Trace Metadata Footer in Agent Message */
+.message-trace-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  opacity: 0.65;
+  transition: opacity 0.2s ease;
+}
+
+.message-trace-footer:hover {
+  opacity: 1;
+}
+
+.trace-id {
+  color: var(--text-muted);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-copy-ticket {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text-muted);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-copy-ticket:hover {
+  background: rgba(246, 130, 31, 0.2);
+  border-color: rgba(246, 130, 31, 0.4);
+  color: var(--cf-orange);
+}
+
+.btn-copy-ticket.copied {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #10b981;
+}
+
+.copy-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 /* Tool execution status badge */
 .tool-pill {
   display: inline-flex;

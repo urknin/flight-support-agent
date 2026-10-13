@@ -129,10 +129,114 @@ async function fetchNotifications() {
 let currentThinkingBubble = null;
 let currentResponseBubble = null;
 let currentAccumulatedText = "";
+let currentTurnMessageId = null;
 
-function extractTextFromStreamBody(body) {
-  if (!body) return "";
+// Clean assistant text of any leaked {"type":"start",...} headers
+function cleanAssistantText(rawText) {
+  if (!rawText) return { cleanText: "", extractedId: null };
+  let extractedId = null;
+  const match = rawText.match(/\{"type":"start","messageId":"([^"]+)"\}/);
+  if (match) {
+    extractedId = match[1];
+  }
+  const cleanText = rawText.replace(/\{"type":"start"[^}]*\}/g, "").trim();
+  return { cleanText, extractedId };
+}
+
+// Generate the HTML for the bottom-right trace footer & ticket copy button
+function renderTraceFooterHtml(traceId) {
+  if (!traceId) return "";
+  const shortId = traceId.length > 28 ? traceId.slice(0, 25) + "…" : traceId;
+  return `
+    <div class="message-trace-footer">
+      <span class="trace-id" title="Support Ticket ID: ${escapeHtml(traceId)}">ticket: ${escapeHtml(shortId)}</span>
+      <button class="btn-copy-ticket" data-copy="${escapeHtml(traceId)}" title="Copy Ticket Trace ID for Support" type="button">
+        <svg class="copy-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span class="copy-label">Copy</span>
+      </button>
+    </div>
+  `;
+}
+
+// Ensure the trace footer is placed in an agent message bubble
+function ensureTraceFooter(bubble, traceId) {
+  if (!bubble || !traceId) return;
+  const existing = bubble.querySelector(".message-trace-footer");
+  if (!existing) {
+    bubble.insertAdjacentHTML("beforeend", renderTraceFooterHtml(traceId));
+    attachCopyHandlers(bubble);
+  } else {
+    const btn = existing.querySelector(".btn-copy-ticket");
+    const label = existing.querySelector(".trace-id");
+    if (btn && label && btn.getAttribute("data-copy") !== traceId) {
+      btn.setAttribute("data-copy", traceId);
+      const shortId = traceId.length > 28 ? traceId.slice(0, 25) + "…" : traceId;
+      label.textContent = `ticket: ${shortId}`;
+      label.title = `Support Ticket ID: ${traceId}`;
+    }
+  }
+}
+
+// Attach clipboard copy handler with feedback
+function attachCopyHandlers(container) {
+  const buttons = container.querySelectorAll(".btn-copy-ticket:not([data-bound])");
+  buttons.forEach((btn) => {
+    btn.setAttribute("data-bound", "true");
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const textToCopy = btn.getAttribute("data-copy") || "";
+      if (!textToCopy) return;
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(textToCopy);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = textToCopy;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+        }
+
+        btn.classList.add("copied");
+        const label = btn.querySelector(".copy-label");
+        const icon = btn.querySelector(".copy-icon");
+        if (label) label.textContent = "Copied! ✓";
+        if (icon) {
+          icon.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
+        }
+
+        setTimeout(() => {
+          btn.classList.remove("copied");
+          if (label) label.textContent = "Copy";
+          if (icon) {
+            icon.innerHTML = '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>';
+          }
+        }, 2000);
+      } catch (err) {
+        console.error("Failed to copy trace ID:", err);
+      }
+    });
+  });
+}
+
+function extractTextAndMetaFromStreamBody(body) {
+  if (!body) return { text: "", messageId: null };
   let extracted = "";
+  let messageId = null;
+
+  // Extract start messageId if present anywhere in body
+  const startMatch = body.match(/\{"type":"start","messageId":"([^"]+)"\}/);
+  if (startMatch) {
+    messageId = startMatch[1];
+  }
+
   const lines = body.split("\n");
   for (const line of lines) {
     let text = line.trim();
@@ -141,10 +245,23 @@ function extractTextFromStreamBody(body) {
       text = text.slice(5).trim();
     }
     if (text === "[DONE]") continue;
+
+    // Remove inline {"type":"start"...} if combined on a line with error or prose
+    if (text.includes('{"type":"start"')) {
+      const inlineMatch = text.match(/\{"type":"start","messageId":"([^"]+)"\}/);
+      if (inlineMatch && !messageId) {
+        messageId = inlineMatch[1];
+      }
+      text = text.replace(/\{"type":"start"[^}]*\}/g, "").trim();
+      if (!text) continue;
+    }
+
     if (text.startsWith("{") && text.endsWith("}")) {
       try {
         const obj = JSON.parse(text);
-        if (obj.type === "text-delta" && obj.delta) {
+        if (obj.type === "start" && obj.messageId) {
+          messageId = obj.messageId;
+        } else if (obj.type === "text-delta" && obj.delta) {
           extracted += obj.delta;
         } else if (obj.type === "error") {
           console.warn("[Agent Stream Error]", obj.error);
@@ -157,7 +274,7 @@ function extractTextFromStreamBody(body) {
       extracted += text + " ";
     }
   }
-  return extracted;
+  return { text: extracted, messageId };
 }
 
 function connectAgentWebSocket() {
@@ -194,21 +311,35 @@ function connectAgentWebSocket() {
       if (data.type === "cf_agent_use_chat_response" || data.type === "CF_AGENT_USE_CHAT_RESPONSE") {
         if (currentThinkingBubble) {
           if (!currentResponseBubble) {
-            currentThinkingBubble.innerHTML = "";
+            currentThinkingBubble.innerHTML = '<div class="message-body"></div>';
             currentResponseBubble = currentThinkingBubble;
           }
           if (data.body) {
-            const chunkText = extractTextFromStreamBody(data.body);
+            const { text: chunkText, messageId: chunkId } = extractTextAndMetaFromStreamBody(data.body);
+            if (chunkId && !currentTurnMessageId) {
+              currentTurnMessageId = chunkId;
+            }
             if (chunkText) {
               currentAccumulatedText += chunkText;
-              currentResponseBubble.innerHTML = formatMarkdown(currentAccumulatedText);
+              const bodyEl = currentResponseBubble.querySelector(".message-body");
+              if (bodyEl) {
+                bodyEl.innerHTML = formatMarkdown(currentAccumulatedText);
+              }
+              if (currentTurnMessageId) {
+                ensureTraceFooter(currentResponseBubble, currentTurnMessageId);
+              }
               scrollToBottom();
             }
           }
           if (data.done) {
+            if (currentResponseBubble) {
+              const traceId = currentTurnMessageId || `assistant_${Date.now()}`;
+              ensureTraceFooter(currentResponseBubble, traceId);
+            }
             currentThinkingBubble = null;
             currentResponseBubble = null;
             currentAccumulatedText = "";
+            currentTurnMessageId = null;
             fetchBookingDetails();
             fetchNotifications();
           }
@@ -218,12 +349,24 @@ function connectAgentWebSocket() {
       // Non-JSON frame (e.g. raw streaming text chunk)
       if (typeof event.data === "string" && currentThinkingBubble) {
         if (!currentResponseBubble) {
-          currentThinkingBubble.innerHTML = "";
+          currentThinkingBubble.innerHTML = '<div class="message-body"></div>';
           currentResponseBubble = currentThinkingBubble;
         }
-        currentAccumulatedText += event.data;
-        currentResponseBubble.innerHTML = formatMarkdown(currentAccumulatedText);
-        scrollToBottom();
+        const { text: cleanChunk, messageId: extractedId } = extractTextAndMetaFromStreamBody(event.data);
+        if (extractedId && !currentTurnMessageId) {
+          currentTurnMessageId = extractedId;
+        }
+        if (cleanChunk) {
+          currentAccumulatedText += cleanChunk;
+          const bodyEl = currentResponseBubble.querySelector(".message-body");
+          if (bodyEl) {
+            bodyEl.innerHTML = formatMarkdown(currentAccumulatedText);
+          }
+          if (currentTurnMessageId) {
+            ensureTraceFooter(currentResponseBubble, currentTurnMessageId);
+          }
+          scrollToBottom();
+        }
       }
     }
   };
@@ -253,14 +396,22 @@ function appendUserMessage(text) {
   scrollToBottom();
 }
 
-function appendAgentMessage(text) {
+function appendAgentMessage(text, messageId = null) {
   const row = document.createElement("div");
   row.className = "message-row agent";
+
+  const { cleanText, extractedId } = cleanAssistantText(text);
+  const finalId = messageId || extractedId;
+
   row.innerHTML = `
     <div class="message-avatar avatar-agent">AI</div>
-    <div class="message-bubble">${formatMarkdown(text)}</div>
+    <div class="message-bubble">
+      <div class="message-body">${formatMarkdown(cleanText)}</div>
+      ${finalId ? renderTraceFooterHtml(finalId) : ""}
+    </div>
   `;
   messagesContainer.appendChild(row);
+  attachCopyHandlers(row);
   scrollToBottom();
   return row.querySelector(".message-bubble");
 }
@@ -290,7 +441,7 @@ function renderFullHistory(messages) {
       if (text) appendUserMessage(text);
     } else if (msg.role === "assistant") {
       const text = msg.parts?.find((p) => p.type === "text")?.text || "";
-      if (text) appendAgentMessage(text);
+      if (text) appendAgentMessage(text, msg.id);
     }
   });
 }
@@ -346,6 +497,7 @@ chatForm.addEventListener("submit", async (e) => {
     };
 
     // Show temporary typing indicator
+    currentTurnMessageId = null;
     currentThinkingBubble = appendAgentMessage("Thinking and checking flight systems...");
     currentResponseBubble = null;
     currentAccumulatedText = "";
