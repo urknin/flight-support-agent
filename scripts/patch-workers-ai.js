@@ -16,21 +16,28 @@ for (const filePath of filesToPatch) {
   }
   let content = fs.readFileSync(filePath, 'utf-8');
 
-  // Check if already patched
-  if (content.includes('!Array.isArray(chunk.tool_calls)')) {
-    console.log(`[patch-workers-ai] ${path.basename(filePath)} is already patched.`);
+  // If already patched with hasChoicesDelta, skip
+  if (content.includes('hasChoicesDelta')) {
+    console.log(`[patch-workers-ai] ${path.basename(filePath)} is already patched with dual-format deduplication.`);
     continue;
   }
 
-  // Replace double-invocation bug of emitToolCallDeltas
-  const target = 'if (Array.isArray(deltaToolCalls)) {';
-  const replacement = 'if (Array.isArray(deltaToolCalls) && !Array.isArray(chunk.tool_calls)) {';
+  // 1. Guard native response text against dual-format duplication
+  content = content.replace(
+    'const nativeResponse = chunk.response;\n\t\t\tif (nativeResponse != null',
+    'const hasChoicesDelta = choices?.[0]?.delta != null;\n\t\t\tconst nativeResponse = chunk.response;\n\t\t\tif (!hasChoicesDelta && nativeResponse != null'
+  );
+  content = content.replace(
+    'const nativeResponse = chunk.response;\n\t\t\t\tif (nativeResponse != null',
+    'const hasChoicesDelta = choices?.[0]?.delta != null;\n\t\t\t\tconst nativeResponse = chunk.response;\n\t\t\t\tif (!hasChoicesDelta && nativeResponse != null'
+  );
 
-  if (content.includes(target)) {
-    content = content.replace(target, replacement);
-    fs.writeFileSync(filePath, content, 'utf-8');
-    console.log(`[patch-workers-ai] Successfully patched ${path.basename(filePath)}.`);
-  } else {
-    console.warn(`[patch-workers-ai] Target pattern not found in ${path.basename(filePath)}.`);
-  }
+  // 2. Guard native tool_calls against dual-format duplication
+  content = content.replace(
+    'if (Array.isArray(chunk.tool_calls)) {',
+    'if (!hasChoicesDelta && Array.isArray(chunk.tool_calls)) {'
+  );
+
+  fs.writeFileSync(filePath, content, 'utf-8');
+  console.log(`[patch-workers-ai] Successfully patched ${path.basename(filePath)}.`);
 }

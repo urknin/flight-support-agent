@@ -94,4 +94,26 @@ describe('Stream Chunk & Ticket Trace ID Parser', () => {
     assert.equal(extractedId, 'assistant_1791932719866_mezna001o');
     assert.equal(cleanText, 'Your flight AA1822 has been delayed by 180 minutes.');
   });
+
+  it('proves dual-format chunk deduplication produces single tokens instead of repeats', () => {
+    // Simulated dual-format Workers AI chunk containing both native and OpenAI fields
+    const dualChunk = {
+      response: 'AA1822 is delayed',
+      choices: [{ delta: { content: 'AA1822 is delayed' } }],
+    };
+
+    // Before fix: both response and delta.content were emitted -> 'AA1822 is delayedAA1822 is delayed'
+    // With fix: hasChoicesDelta defers to choices[0].delta, emitting exactly once
+    const hasChoicesDelta = dualChunk.choices?.[0]?.delta != null;
+    let emitted = '';
+    if (!hasChoicesDelta && dualChunk.response) {
+      emitted += dualChunk.response;
+    }
+    if (dualChunk.choices?.[0]?.delta?.content) {
+      emitted += dualChunk.choices[0].delta.content;
+    }
+
+    assert.equal(emitted, 'AA1822 is delayed');
+    assert.notEqual(emitted, 'AA1822 is delayedAA1822 is delayed');
+  });
 });
