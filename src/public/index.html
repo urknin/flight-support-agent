@@ -134,11 +134,47 @@
         <div class="message-row agent">
           <div class="message-avatar avatar-agent">AI</div>
           <div class="message-bubble">
-            Hello Alex, I'm your AeroCare Flight Support Assistant. 
-            <br><br>
-            I see your booking <strong>SKY-8842</strong> on flight <strong>AA1822</strong> from Dallas (DFW) to Chicago (ORD) is currently delayed due to severe thunderstorms and an FAA Ground Stop.
-            <br><br>
-            How can I assist you today? I can explain the weather delays, help you rebook onto an alternative flight, or set up text/email alerts for status changes.
+            <div class="message-body">
+              Hello Alex, I'm your AeroCare Flight Support Assistant.
+              <br><br>
+              I see your booking <strong>SKY-8842</strong> on flight <strong>AA1822</strong> from Dallas (DFW) to Chicago (ORD) is delayed by 180 minutes due to severe thunderstorms and an active FAA Ground Stop at DFW.
+            </div>
+            <div class="followup-cards-wrapper">
+              <div class="followup-cards-header">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+                <span>Suggested Next Steps:</span>
+              </div>
+              <div class="followup-cards-grid">
+                <button class="followup-card" data-prompt="Why is flight AA1822 delayed and what is the DFW weather?" type="button" title="Pursue: Why is flight AA1822 delayed?">
+                  <span class="card-label">Check AA1822 Delay & Weather</span>
+                  <span class="card-arrow">➔</span>
+                </button>
+                <button class="followup-card" data-prompt="Find me alternative flights to Chicago with open seats." type="button" title="Pursue: Find alternative flights">
+                  <span class="card-label">Find Open Flights to Chicago</span>
+                  <span class="card-arrow">➔</span>
+                </button>
+                <button class="followup-card" data-prompt="Please rebook me onto flight AA2040 departing at 18:45 UTC." type="button" title="Pursue: Rebook to AA2040">
+                  <span class="card-label">Rebook to Flight AA2040</span>
+                  <span class="card-arrow">➔</span>
+                </button>
+                <button class="followup-card" data-prompt="Please text me updates at +15125550199 if anything changes." type="button" title="Pursue: Set Up SMS Alerts">
+                  <span class="card-label">Set Up SMS Delay Alerts</span>
+                  <span class="card-arrow">➔</span>
+                </button>
+              </div>
+            </div>
+            <div class="message-trace-footer">
+              <span class="trace-id" title="Support Ticket ID: ticket_session_init_sky8842">ticket: session_init_sky8842</span>
+              <button class="btn-copy-ticket" data-copy="ticket_session_init_sky8842" title="Copy Ticket Trace ID for Support" type="button">
+                <svg class="copy-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span class="copy-label">Copy</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

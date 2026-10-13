@@ -525,6 +525,82 @@ header {
   margin: 0.3rem 0;
 }
 
+/* Follow-up Action Cards at Bottom of Agent Response */
+.followup-cards-wrapper {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.followup-cards-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.55rem;
+}
+
+.followup-cards-header svg {
+  color: var(--cf-orange);
+}
+
+.followup-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.5rem;
+}
+
+.followup-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  background: rgba(17, 24, 39, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  color: var(--text-main);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.followup-card:hover {
+  background: rgba(31, 41, 55, 0.95);
+  border-color: var(--cf-orange);
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(246, 130, 31, 0.25);
+}
+
+.followup-card:active {
+  transform: translateY(0);
+}
+
+.followup-card .card-label {
+  flex: 1;
+  line-height: 1.35;
+}
+
+.followup-card .card-arrow {
+  color: var(--cf-orange);
+  font-weight: 700;
+  font-size: 0.85rem;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.followup-card:hover .card-arrow {
+  transform: translateX(3px);
+}
+
 /* Quick Prompt Suggestions */
 .quick-prompts {
   padding: 0.5rem 1.25rem;

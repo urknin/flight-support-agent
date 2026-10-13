@@ -116,4 +116,82 @@ describe('Stream Chunk & Ticket Trace ID Parser', () => {
     assert.equal(emitted, 'AA1822 is delayed');
     assert.notEqual(emitted, 'AA1822 is delayedAA1822 is delayed');
   });
+
+  it('parses <suggestions> block into interactive followup cards cleanly', () => {
+    function parseSuggestions(text: string) {
+      if (!text) return { cleanText: '', suggestions: [] as { label: string; prompt: string }[] };
+      let cleanText = text;
+      cleanText = cleanText.replace(/```(?:suggestions?|xml|html)?\s*(<suggestions?>)/gi, '$1');
+      cleanText = cleanText.replace(/(<\/suggestions?>)\s*```/gi, '$1');
+
+      const match = cleanText.match(/<suggestions?>([\s\S]*?)<\/suggestions?>/i);
+      let suggestions: { label: string; prompt: string }[] = [];
+
+      if (match) {
+        cleanText = cleanText.replace(/<suggestions?>[\s\S]*?<\/suggestions?>/i, '').trim();
+        const lines = match[1].split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim().replace(/^[-*•\d.]+\s*/, '');
+          if (!trimmed) continue;
+          const parts = trimmed.split('|');
+          if (parts.length >= 2) {
+            suggestions.push({
+              label: parts[0].trim().replace(/^\[|\]$/g, ''),
+              prompt: parts.slice(1).join('|').trim().replace(/^\[|\]$/g, ''),
+            });
+          } else if (parts.length === 1 && parts[0].trim()) {
+            const item = parts[0].trim().replace(/^\[|\]$/g, '');
+            suggestions.push({ label: item, prompt: item });
+          }
+        }
+      } else {
+        cleanText = cleanText.replace(/<suggestions?>[\s\S]*$/i, '').trim();
+      }
+
+      return { cleanText, suggestions };
+    }
+
+    const rawResponse = `Your flight AA1822 is delayed by 180 minutes due to severe thunderstorms and an active FAA Ground Stop at DFW. Open seats are confirmed on flight AA2040 (18:45 UTC).
+
+<suggestions>
+- Rebook on AA2040 (18:45 UTC) | Please rebook me onto flight AA2040 departing at 18:45 UTC.
+- Check DFW Storm Radar | What is the current weather and FAA ground delay status at DFW?
+- Set Up SMS Delay Alerts | Register my mobile phone +15125550199 for automated SMS disruption updates.
+</suggestions>`;
+
+    const { cleanText, suggestions } = parseSuggestions(rawResponse);
+
+    // Primary ask response is separated from suggestions
+    assert.equal(
+      cleanText,
+      'Your flight AA1822 is delayed by 180 minutes due to severe thunderstorms and an active FAA Ground Stop at DFW. Open seats are confirmed on flight AA2040 (18:45 UTC).'
+    );
+    assert.equal(suggestions.length, 3);
+    assert.equal(suggestions[0].label, 'Rebook on AA2040 (18:45 UTC)');
+    assert.equal(suggestions[0].prompt, 'Please rebook me onto flight AA2040 departing at 18:45 UTC.');
+    assert.equal(suggestions[1].label, 'Check DFW Storm Radar');
+    assert.equal(suggestions[2].label, 'Set Up SMS Delay Alerts');
+  });
+
+  it('hides unclosed <suggestions> tags while response is streaming', () => {
+    function parseSuggestions(text: string) {
+      if (!text) return { cleanText: '', suggestions: [] as { label: string; prompt: string }[] };
+      let cleanText = text;
+      const match = cleanText.match(/<suggestions?>([\s\S]*?)<\/suggestions?>/i);
+      let suggestions: { label: string; prompt: string }[] = [];
+
+      if (match) {
+        cleanText = cleanText.replace(/<suggestions?>[\s\S]*?<\/suggestions?>/i, '').trim();
+      } else {
+        cleanText = cleanText.replace(/<suggestions?>[\s\S]*$/i, '').trim();
+      }
+      return { cleanText, suggestions };
+    }
+
+    const streamingChunk = 'Flight AA1822 is delayed by 180 mins.<suggestions>\n- Rebook to AA2040 | Please';
+    const { cleanText, suggestions } = parseSuggestions(streamingChunk);
+
+    assert.equal(cleanText, 'Flight AA1822 is delayed by 180 mins.');
+    assert.equal(suggestions.length, 0);
+  });
 });

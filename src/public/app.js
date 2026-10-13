@@ -226,6 +226,131 @@ function attachCopyHandlers(container) {
   });
 }
 
+// Parse <suggestions> block into interactive cards
+function parseSuggestions(text) {
+  if (!text) return { cleanText: "", suggestions: [] };
+  let cleanText = text;
+
+  // Strip markdown code blocks enclosing suggestions if model outputs ```suggestions ... ```
+  cleanText = cleanText.replace(/```(?:suggestions?|xml|html)?\s*(<suggestions?>)/gi, "$1");
+  cleanText = cleanText.replace(/(<\/suggestions?>)\s*```/gi, "$1");
+
+  const match = cleanText.match(/<suggestions?>([\s\S]*?)<\/suggestions?>/i);
+  let suggestions = [];
+
+  if (match) {
+    cleanText = cleanText.replace(/<suggestions?>[\s\S]*?<\/suggestions?>/i, "").trim();
+    const lines = match[1].split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim().replace(/^[-*•\d.]+\s*/, "");
+      if (!trimmed) continue;
+      const parts = trimmed.split("|");
+      if (parts.length >= 2) {
+        suggestions.push({
+          label: parts[0].trim().replace(/^\[|\]$/g, ""),
+          prompt: parts.slice(1).join("|").trim().replace(/^\[|\]$/g, ""),
+        });
+      } else if (parts.length === 1 && parts[0].trim()) {
+        const item = parts[0].trim().replace(/^\[|\]$/g, "");
+        suggestions.push({
+          label: item,
+          prompt: item,
+        });
+      }
+    }
+  } else {
+    // If <suggestions> tag is still streaming (incomplete closing tag), hide the opening tag and subsequent tokens
+    cleanText = cleanText.replace(/<suggestions?>[\s\S]*$/i, "").trim();
+  }
+
+  return { cleanText, suggestions };
+}
+
+// Provide contextual fallback action cards if the model emits pure text without suggestions
+function getFallbackSuggestions(text = "") {
+  const lower = text.toLowerCase();
+  if (lower.includes("rebook") && (lower.includes("confirm") || lower.includes("success") || lower.includes("updated"))) {
+    return [
+      { label: "Confirm Updated Itinerary", prompt: "Please confirm my updated itinerary for booking SKY-8842." },
+      { label: "Check In & Boarding Info", prompt: "What time does boarding start for my rebooked flight?" },
+      { label: "Set Up SMS Flight Alerts", prompt: "Register my phone +15125550199 for automated SMS updates on my new flight." },
+    ];
+  }
+  if (lower.includes("weather") || lower.includes("storm") || lower.includes("radar") || lower.includes("faa")) {
+    return [
+      { label: "Find Flights to Chicago", prompt: "Find me alternative flights to Chicago with open seats." },
+      { label: "Rebook on AA2040 (18:45 UTC)", prompt: "Please rebook me onto flight AA2040 departing at 18:45 UTC." },
+      { label: "Set Up SMS Delay Alerts", prompt: "Please text me updates at +15125550199 if anything changes." },
+    ];
+  }
+  if (lower.includes("alternative") || lower.includes("aa2040") || lower.includes("aa912")) {
+    return [
+      { label: "Rebook to AA2040 (18:45 UTC)", prompt: "Please rebook me onto flight AA2040 departing at 18:45 UTC." },
+      { label: "Rebook to AA912 (17:30 UTC)", prompt: "Please rebook me onto flight AA912 departing at 17:30 UTC." },
+      { label: "Check DFW Storm Radar", prompt: "What is the latest weather and radar report at DFW?" },
+    ];
+  }
+  return [
+    { label: "Check AA1822 Delay & Weather", prompt: "Why is my flight AA1822 delayed and what is the DFW weather?" },
+    { label: "Find Alternative Flights", prompt: "Find me alternative flights to Chicago with open seats." },
+    { label: "Set Up SMS Delay Alerts", prompt: "Please text me updates at +15125550199 if anything changes." },
+  ];
+}
+
+// Generate HTML for followup action cards
+function renderFollowupCardsHtml(suggestions) {
+  if (!suggestions || suggestions.length === 0) return "";
+  const cardsHtml = suggestions
+    .map(
+      (s) => `
+      <button class="followup-card" data-prompt="${escapeHtml(s.prompt)}" type="button" title="Pursue: ${escapeHtml(s.prompt)}">
+        <span class="card-label">${escapeHtml(s.label)}</span>
+        <span class="card-arrow">➔</span>
+      </button>
+    `
+    )
+    .join("");
+
+  return `
+    <div class="followup-cards-wrapper">
+      <div class="followup-cards-header">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+        <span>Suggested Next Steps:</span>
+      </div>
+      <div class="followup-cards-grid">
+        ${cardsHtml}
+      </div>
+    </div>
+  `;
+}
+
+// Attach click handlers to followup action cards
+function attachCardClickHandlers(container) {
+  if (!container) return;
+  const cards = container.querySelectorAll(".followup-card:not([data-bound])");
+  cards.forEach((card) => {
+    card.setAttribute("data-bound", "true");
+    card.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const prompt = card.getAttribute("data-prompt");
+      if (prompt && chatInput && chatForm) {
+        chatInput.value = prompt;
+        card.style.transform = "scale(0.97)";
+        setTimeout(() => {
+          card.style.transform = "";
+        }, 150);
+        if (typeof chatForm.requestSubmit === "function") {
+          chatForm.requestSubmit();
+        } else {
+          chatForm.dispatchEvent(new Event("submit", { cancelable: true }));
+        }
+      }
+    });
+  });
+}
+
 function extractTextAndMetaFromStreamBody(body) {
   if (!body) return { text: "", messageId: null };
   let extracted = "";
@@ -323,7 +448,8 @@ function connectAgentWebSocket() {
               currentAccumulatedText += chunkText;
               const bodyEl = currentResponseBubble.querySelector(".message-body");
               if (bodyEl) {
-                bodyEl.innerHTML = formatMarkdown(currentAccumulatedText);
+                const { cleanText } = parseSuggestions(currentAccumulatedText);
+                bodyEl.innerHTML = formatMarkdown(cleanText);
               }
               if (currentTurnMessageId) {
                 ensureTraceFooter(currentResponseBubble, currentTurnMessageId);
@@ -335,11 +461,33 @@ function connectAgentWebSocket() {
             if (currentResponseBubble) {
               const bodyEl = currentResponseBubble.querySelector(".message-body");
               if (!currentAccumulatedText.trim()) {
-                currentAccumulatedText = "I have reviewed your booking SKY-8842 and flight AA1822. Your flight is currently delayed by 180 minutes due to convective thunderstorms and an active FAA Ground Stop at DFW. We have confirmed open seats on alternative flights: **AA2040** (departing 18:45 UTC, 8 seats open) and **AA912** (departing 17:30 UTC, 5 seats open). Would you like me to rebook you on AA2040?";
-                if (bodyEl) {
-                  bodyEl.innerHTML = formatMarkdown(currentAccumulatedText);
-                }
+                currentAccumulatedText = "I have reviewed your booking SKY-8842 and flight AA1822. Your flight is currently delayed by 180 minutes due to convective thunderstorms and an active FAA Ground Stop at DFW. We have confirmed open seats on alternative flights: **AA2040** (departing 18:45 UTC, 8 seats open) and **AA912** (departing 17:30 UTC, 5 seats open).\n\n<suggestions>\n- Rebook on AA2040 (18:45 UTC) | Please rebook me on flight AA2040.\n- Check DFW Weather & Radar | What is the current FAA ground delay and weather at DFW?\n- Register for SMS Alerts | Register +15125550199 for SMS flight disruption alerts.\n</suggestions>";
               }
+
+              const { cleanText, suggestions } = parseSuggestions(currentAccumulatedText);
+              if (bodyEl) {
+                bodyEl.innerHTML = formatMarkdown(cleanText);
+              }
+
+              let finalSuggestions = suggestions;
+              if (!finalSuggestions || finalSuggestions.length === 0) {
+                finalSuggestions = getFallbackSuggestions(cleanText);
+              }
+
+              // Remove existing followup cards if any, then insert new cards above trace footer
+              const existingCards = currentResponseBubble.querySelector(".followup-cards-wrapper");
+              if (existingCards) existingCards.remove();
+
+              if (finalSuggestions.length > 0) {
+                const footerEl = currentResponseBubble.querySelector(".message-trace-footer");
+                if (footerEl) {
+                  footerEl.insertAdjacentHTML("beforebegin", renderFollowupCardsHtml(finalSuggestions));
+                } else {
+                  currentResponseBubble.insertAdjacentHTML("beforeend", renderFollowupCardsHtml(finalSuggestions));
+                }
+                attachCardClickHandlers(currentResponseBubble);
+              }
+
               const traceId = currentTurnMessageId || `assistant_${Date.now()}`;
               ensureTraceFooter(currentResponseBubble, traceId);
             }
@@ -367,7 +515,8 @@ function connectAgentWebSocket() {
           currentAccumulatedText += cleanChunk;
           const bodyEl = currentResponseBubble.querySelector(".message-body");
           if (bodyEl) {
-            bodyEl.innerHTML = formatMarkdown(currentAccumulatedText);
+            const { cleanText } = parseSuggestions(currentAccumulatedText);
+            bodyEl.innerHTML = formatMarkdown(cleanText);
           }
           if (currentTurnMessageId) {
             ensureTraceFooter(currentResponseBubble, currentTurnMessageId);
@@ -407,18 +556,31 @@ function appendAgentMessage(text, messageId = null) {
   const row = document.createElement("div");
   row.className = "message-row agent";
 
-  const { cleanText, extractedId } = cleanAssistantText(text);
+  const { cleanText: startCleaned, extractedId } = cleanAssistantText(text);
   const finalId = messageId || extractedId;
+  const { cleanText, suggestions } = parseSuggestions(startCleaned);
+
+  const isTemporary = cleanText.includes("Thinking and checking") || cleanText.includes("Reconnecting");
+  let finalSuggestions = suggestions;
+  if (!isTemporary && (!finalSuggestions || finalSuggestions.length === 0)) {
+    finalSuggestions = getFallbackSuggestions(cleanText);
+  }
+
+  const cardsHtml = isTemporary ? "" : renderFollowupCardsHtml(finalSuggestions);
 
   row.innerHTML = `
     <div class="message-avatar avatar-agent">AI</div>
     <div class="message-bubble">
       <div class="message-body">${formatMarkdown(cleanText)}</div>
+      ${cardsHtml}
       ${finalId ? renderTraceFooterHtml(finalId) : ""}
     </div>
   `;
   messagesContainer.appendChild(row);
   attachCopyHandlers(row);
+  if (finalSuggestions.length > 0 && !isTemporary) {
+    attachCardClickHandlers(row);
+  }
   scrollToBottom();
   return row.querySelector(".message-bubble");
 }
@@ -589,6 +751,8 @@ btnQuickRestore.addEventListener("click", () => {
 // 6. Bootstrap
 // ============================================================================
 
+attachCardClickHandlers(messagesContainer);
+attachCopyHandlers(messagesContainer);
 fetchBookingDetails();
 fetchAirportWeather("DFW");
 fetchNotifications();
