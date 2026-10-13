@@ -80,11 +80,18 @@ export default {
         await updateFlightStatus(env.DB, flightNumber, status, reason);
 
         // Also trigger proactive notification to passenger if subscribed
-        const sub = await env.DB
-          .prepare("SELECT * FROM alert_subscriptions WHERE booking_ref = 'SKY-8842' LIMIT 1")
-          .first<any>();
+        const subs = await env.DB
+          .prepare("SELECT * FROM alert_subscriptions WHERE booking_ref = 'SKY-8842'")
+          .all<any>();
 
-        if (sub) {
+        const channelsToNotify = (subs.results && subs.results.length > 0)
+          ? subs.results
+          : [
+              { channel: "sms", recipient: "+15125550199" },
+              { channel: "email", recipient: "alex.mercer@example.com" }
+            ];
+
+        for (const sub of channelsToNotify) {
           await dispatchAlert(
             env,
             "SKY-8842",
@@ -93,8 +100,10 @@ export default {
             `Flight Alert: ${flightNumber} ${status}`,
             `Adverse Weather Update: Flight ${flightNumber} is now ${status}. Reason: ${reason}. Open support chat to view alternative flight options.`
           );
+        }
 
-          // Push into the Durable Object session
+        // Push into the Durable Object session if active
+        try {
           const agentNs = env.SupportAgent as any;
           const agentId = agentNs.idFromName("SKY-8842");
           const agentStub = agentNs.get(agentId);
@@ -103,6 +112,8 @@ export default {
             body: `Adverse Weather Update: Flight ${flightNumber} is now ${status}. Reason: ${reason}.`,
             newStatus: status,
           });
+        } catch (e) {
+          console.warn("[SimulateDisruption] Agent push error (expected if not yet connected):", e);
         }
 
         return new Response(
@@ -111,7 +122,7 @@ export default {
             flightNumber,
             status,
             reason,
-            notified: !!sub,
+            notified: channelsToNotify.length > 0,
           }),
           { headers: corsHeaders }
         );

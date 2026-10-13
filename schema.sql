@@ -100,3 +100,8 @@ INSERT OR REPLACE INTO bookings (booking_ref, passenger_id, flight_number, seat,
   ('SKY-8842', 'P-101', 'AA1822', '14B', 'CONFIRMED', '2026-10-13T12:00:00Z'),
   ('SKY-1904', 'P-102', 'UA450',  '03A', 'CONFIRMED', '2026-10-13T10:00:00Z');
 
+INSERT OR REPLACE INTO alert_subscriptions (id, booking_ref, channel, recipient, last_notified_status, created_at) VALUES
+  ('SUB-001', 'SKY-8842', 'sms', '+15125550199', 'INITIAL', '2026-10-13T12:00:00Z'),
+  ('SUB-002', 'SKY-8842', 'email', 'alex.mercer@example.com', 'INITIAL', '2026-10-13T12:00:00Z');
+
+
