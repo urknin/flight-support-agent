@@ -130,6 +130,36 @@ let currentThinkingBubble = null;
 let currentResponseBubble = null;
 let currentAccumulatedText = "";
 
+function extractTextFromStreamBody(body) {
+  if (!body) return "";
+  let extracted = "";
+  const lines = body.split("\n");
+  for (const line of lines) {
+    let text = line.trim();
+    if (!text) continue;
+    if (text.startsWith("data:")) {
+      text = text.slice(5).trim();
+    }
+    if (text === "[DONE]") continue;
+    if (text.startsWith("{") && text.endsWith("}")) {
+      try {
+        const obj = JSON.parse(text);
+        if (obj.type === "text-delta" && obj.delta) {
+          extracted += obj.delta;
+        } else if (obj.type === "error") {
+          console.warn("[Agent Stream Error]", obj.error);
+          extracted += `\n\n*(Notice: ${obj.error || "System is checking alternative flights."})*`;
+        }
+      } catch {
+        // Not valid JSON
+      }
+    } else if (!text.startsWith("{") && !text.startsWith("data:")) {
+      extracted += text + " ";
+    }
+  }
+  return extracted;
+}
+
 function connectAgentWebSocket() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${protocol}//${window.location.host}/agents/support-agent/${BOOKING_REF}`;
@@ -168,9 +198,12 @@ function connectAgentWebSocket() {
             currentResponseBubble = currentThinkingBubble;
           }
           if (data.body) {
-            currentAccumulatedText += data.body;
-            currentResponseBubble.innerHTML = formatMarkdown(currentAccumulatedText);
-            scrollToBottom();
+            const chunkText = extractTextFromStreamBody(data.body);
+            if (chunkText) {
+              currentAccumulatedText += chunkText;
+              currentResponseBubble.innerHTML = formatMarkdown(currentAccumulatedText);
+              scrollToBottom();
+            }
           }
           if (data.done) {
             currentThinkingBubble = null;

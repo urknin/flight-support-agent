@@ -10,7 +10,8 @@
     "binding": "ASSETS"
   },
   "ai": {
-    "binding": "AI"
+    "binding": "AI",
+    "remote": true
   },
   "durable_objects": {
     "bindings": [
