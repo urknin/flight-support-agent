@@ -1,0 +1,28 @@
+# Plan files (User specified to ignore)
+PLAN.md
+plan.md
+*plan*.md
+
+# Node & Package managers
+node_modules/
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Cloudflare & Wrangler artifacts
+.wrangler/
+dist/
+.dev.vars
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
