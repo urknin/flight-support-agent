@@ -40,7 +40,7 @@ Powered by **Cloudflare Agents SDK**, **Workers AI (Llama 3.3 70B)**, **Cloudfla
 
 | Cloudflare Primitive | Implementation in Project | Key Value Delivered |
 | :--- | :--- | :--- |
-| **Workers AI** | `@cf/meta/llama-3.3-70b-instruct` | Zero-latency inference on Cloudflare's edge; tool calling for airport weather, seat lookups, and rebooking. |
+| **Workers AI** | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Zero-latency inference on Cloudflare's edge; tool calling for airport weather, seat lookups, and rebooking. |
 | **Agents SDK** | `AIChatAgent` on Durable Objects | Persistent per-passenger WebSocket sessions, conversational memory, and bi-directional push. |
 | **Cloudflare Workflows** | `FlightWatcherWorkflow` | Bounded, state-diff-driven background watcher with durable sleep steps and automatic retry. |
 | **Cloudflare D1** | `flight-support-db` (SQLite) | Relational storage for flights, seat inventories, passenger profiles, and delivery audit logs. |

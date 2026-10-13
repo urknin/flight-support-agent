@@ -201,7 +201,7 @@ export class SupportAgent extends AIChatAgent<Env> {
 
       // Stream reasoning & tool calls using Llama 3.3
       const result = streamText({
-        model: workersai("@cf/meta/llama-3.3-70b-instruct"),
+        model: workersai("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
         system: SYSTEM_INSTRUCTIONS,
         messages: modelMessages,
         tools,
