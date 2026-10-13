@@ -118,6 +118,26 @@ To prevent brittle implementation, the plan underwent two rounds of adversarial 
 
 ---
 
+### Prompt 4.2: Structured Prompt Sectioning & Interactive Follow-Up Action Cards
+**Prompt**:
+> *"2048 tokens are a lot. nobody wants to read all that. can you break the input prompts into appropriate sections? return the response to the primary ask by the customer. serve followup questions as cards at the bottom of the response. the agent can click on a card he wants to pursue"*
+
+**Changes & Architectural Enhancements**:
+1. **Sectioned System Instructions (`src/agent.ts`)**:
+   - `SECTION 1: PRIMARY RESPONSE & BREVITY`: Strict rules to directly answer the customer's primary ask in 2–3 factual sentences (<120 words) with concise bullet alternatives and zero filler.
+   - `SECTION 2: WORKFLOW PRINCIPLES`: Explicit ordering of tools (`lookupPassengerBooking` -> `getAirportConditions` -> `findAlternativeFlights` -> `rebookPassengerFlight` -> `subscribeToFlightAlerts`).
+   - `SECTION 3: FOLLOW-UP ACTION CARDS`: Dedicated specification requiring 2–3 logical next steps enclosed in a `<suggestions>` block formatted as `- [Label] | [Explicit User Prompt]`.
+2. **Token Budgeting**:
+   - Capped `maxOutputTokens: 600` in `streamText` to avoid generating verbose walls of text while retaining sufficient headroom for tool orchestration.
+3. **Interactive UI Card System (`src/public/app.js`, `style.css`, `index.html`)**:
+   - Implemented `parseSuggestions(text)` to cleanly extract `<suggestions>` tags from prose (and suppress partial opening tags while streaming to prevent flickering).
+   - Rendered clickable `.followup-card` action buttons with hover lift, orange glow, and arrow indicators.
+   - Attached click handlers that populate the chat input and auto-submit the turn when clicked, allowing immediate pursuit of chosen branches.
+   - Preserved trace ticket footer and copy utility at the bottom-right below the action cards.
+   - Added unit tests in `test/stream-parser.test.ts` verifying parser accuracy and streaming suppression.
+
+---
+
 ## 5. Reflections on AI-Assisted Engineering
 
 1. **Iterative Verification Over Blind Acceptance**:
