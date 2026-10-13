@@ -1,6 +1,6 @@
 import { AIChatAgent, OnChatMessageOptions } from "@cloudflare/ai-chat";
 import { createWorkersAI } from "workers-ai-provider";
-import { streamText, convertToModelMessages, tool, GenerateTextOnFinishCallback } from "ai";
+import { streamText, convertToModelMessages, tool, isStepCount, GenerateTextOnFinishCallback } from "ai";
 import { z } from "zod";
 import { Env } from "./types";
 import { getAirportWeather } from "./tools/weather";
@@ -199,12 +199,13 @@ export class SupportAgent extends AIChatAgent<Env> {
       const recentMessages = this.messages.slice(-10);
       const modelMessages = await convertToModelMessages(recentMessages);
 
-      // Stream reasoning & tool calls using Llama 3.3
+      // Stream reasoning & multi-step tool calls using Llama 3.3
       const result = streamText({
         model: workersai("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
         system: SYSTEM_INSTRUCTIONS,
         messages: modelMessages,
         tools,
+        stopWhen: isStepCount(5),
         onFinish,
       });
 
