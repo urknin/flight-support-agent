@@ -126,9 +126,13 @@ async function fetchNotifications() {
 // 2. WebSocket Connection to Durable Object Agent
 // ============================================================================
 
+let currentThinkingBubble = null;
+let currentResponseBubble = null;
+let currentAccumulatedText = "";
+
 function connectAgentWebSocket() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/agents/SupportAgent/${BOOKING_REF}`;
+  const wsUrl = `${protocol}//${window.location.host}/agents/support-agent/${BOOKING_REF}`;
 
   console.log(`[Agent Client] Connecting to ${wsUrl}...`);
   ws = new WebSocket(wsUrl);
@@ -151,11 +155,43 @@ function connectAgentWebSocket() {
       }
 
       // 2. Chat messages sync from AIChatAgent
-      if (data.type === "CF_AGENT_CHAT_MESSAGES" && Array.isArray(data.messages)) {
+      if ((data.type === "cf_agent_chat_messages" || data.type === "CF_AGENT_CHAT_MESSAGES") && Array.isArray(data.messages)) {
         renderFullHistory(data.messages);
+        return;
+      }
+
+      // 3. Streaming response chunks from AIChatAgent
+      if (data.type === "cf_agent_use_chat_response" || data.type === "CF_AGENT_USE_CHAT_RESPONSE") {
+        if (currentThinkingBubble) {
+          if (!currentResponseBubble) {
+            currentThinkingBubble.innerHTML = "";
+            currentResponseBubble = currentThinkingBubble;
+          }
+          if (data.body) {
+            currentAccumulatedText += data.body;
+            currentResponseBubble.innerHTML = formatMarkdown(currentAccumulatedText);
+            scrollToBottom();
+          }
+          if (data.done) {
+            currentThinkingBubble = null;
+            currentResponseBubble = null;
+            currentAccumulatedText = "";
+            fetchBookingDetails();
+            fetchNotifications();
+          }
+        }
       }
     } catch (e) {
-      // Non-JSON frame (e.g. streaming text chunks)
+      // Non-JSON frame (e.g. raw streaming text chunk)
+      if (typeof event.data === "string" && currentThinkingBubble) {
+        if (!currentResponseBubble) {
+          currentThinkingBubble.innerHTML = "";
+          currentResponseBubble = currentThinkingBubble;
+        }
+        currentAccumulatedText += event.data;
+        currentResponseBubble.innerHTML = formatMarkdown(currentAccumulatedText);
+        scrollToBottom();
+      }
     }
   };
 
@@ -255,31 +291,33 @@ chatForm.addEventListener("submit", async (e) => {
   chatInput.value = "";
   appendUserMessage(text);
 
-  // Send message over WebSocket using CF_AGENT_USE_CHAT_REQUEST
+  // Send message over WebSocket using cf_agent_use_chat_request wire protocol
   if (ws && ws.readyState === WebSocket.OPEN) {
     const requestId = `req_${Date.now()}`;
     const payload = {
-      type: "CF_AGENT_USE_CHAT_REQUEST",
+      type: "cf_agent_use_chat_request",
       id: requestId,
-      messages: [
-        {
-          id: `msg_${Date.now()}`,
-          role: "user",
-          parts: [{ type: "text", text: text }],
-        },
-      ],
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              id: `msg_${Date.now()}`,
+              role: "user",
+              parts: [{ type: "text", text: text }],
+            },
+          ],
+        }),
+      },
     };
 
     // Show temporary typing indicator
-    const thinkingBubble = appendAgentMessage("Thinking and checking flight systems...");
+    currentThinkingBubble = appendAgentMessage("Thinking and checking flight systems...");
+    currentResponseBubble = null;
+    currentAccumulatedText = "";
 
     ws.send(JSON.stringify(payload));
-
-    // Poll updates to reflect any rebooking or flight state changes
-    setTimeout(() => {
-      fetchBookingDetails();
-      fetchNotifications();
-    }, 4000);
   } else {
     appendAgentMessage("Reconnecting to flight operations server... Please try again in a moment.");
     connectAgentWebSocket();

@@ -14,8 +14,15 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // 1. Route Agent WebSocket connections
-    const agentResponse = await routeAgentRequest(request, env);
+    // 1. Route Agent WebSocket connections (support both kebab-case and PascalCase URLs)
+    let agentReq = request;
+    if (url.pathname.includes("/agents/SupportAgent/")) {
+      const rewrittenUrl = new URL(request.url);
+      rewrittenUrl.pathname = rewrittenUrl.pathname.replace("/agents/SupportAgent/", "/agents/support-agent/");
+      agentReq = new Request(rewrittenUrl.toString(), request);
+    }
+
+    const agentResponse = await routeAgentRequest(agentReq, env);
     if (agentResponse) {
       return agentResponse;
     }
