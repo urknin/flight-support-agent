@@ -206,6 +206,7 @@ export class SupportAgent extends AIChatAgent<Env> {
         messages: modelMessages,
         tools,
         stopWhen: isStepCount(5),
+        maxOutputTokens: 2048,
         onFinish,
       });
 
