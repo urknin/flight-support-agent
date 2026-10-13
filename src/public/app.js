@@ -1,13 +1,34 @@
 // ============================================================================
-// AeroCare AI Client Dashboard & WebSocket Driver
-// Connects to Cloudflare SupportAgent Durable Object Actor
+// AeroCare AI Client Dashboard & Multi-Case WebSocket Driver
+// Connects to Cloudflare SupportAgent Durable Object Actors
 // ============================================================================
 
-const BOOKING_REF = "SKY-8842";
+let currentConversationId = sessionStorage.getItem("aerocare_conv_id") || "conv_p101_active";
+let currentBookingRef = "SKY-8842";
+let currentCustomerId = "P-101";
+let currentCaseStatus = "ACTIVE";
+let allPassengersList = [];
+let caseFilterStatus = "ALL";
 let ws = null;
 let reconnectTimer = null;
 
-// DOM Elements
+// Chat Header & Case Meta Elements
+const chatCaseTitle = document.getElementById("chat-case-title");
+const chatCustomerTag = document.getElementById("chat-customer-tag");
+const chatConvIdTag = document.getElementById("chat-conv-id-tag");
+const chatStatusBadge = document.getElementById("chat-status-badge");
+const agentStatusDot = document.getElementById("agent-status-dot");
+const btnResolveChat = document.getElementById("btn-resolve-chat");
+const btnChatSearch = document.getElementById("btn-chat-search");
+const btnChatNew = document.getElementById("btn-chat-new");
+const btnHeaderSearchCases = document.getElementById("btn-header-search-cases");
+const btnHeaderNewCase = document.getElementById("btn-header-new-case");
+const caseResolvedBanner = document.getElementById("case-resolved-banner");
+const resolvedSummaryText = document.getElementById("resolved-summary-text");
+const btnResolvedNewCase = document.getElementById("btn-resolved-new-case");
+const quickPromptsBar = document.getElementById("quick-prompts-bar");
+
+// Chat DOM Elements
 const messagesContainer = document.getElementById("messages-container");
 const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
@@ -39,91 +60,603 @@ const btnSimulate = document.getElementById("btn-simulate-disruption");
 const btnQuickDfw = document.getElementById("btn-quick-dfw");
 const btnQuickRestore = document.getElementById("btn-quick-restore");
 
+// Modal Elements: Search Cases
+const searchCasesModal = document.getElementById("search-cases-modal");
+const btnCloseSearchModal = document.getElementById("btn-close-search-modal");
+const caseSearchInput = document.getElementById("case-search-input");
+const casesResultsList = document.getElementById("cases-results-list");
+const caseStatusFilters = document.getElementById("case-status-filters");
+
+// Modal Elements: New Case
+const newCaseModal = document.getElementById("new-case-modal");
+const btnCloseNewCaseModal = document.getElementById("btn-close-new-case-modal");
+const newCaseCustomerSelect = document.getElementById("new-case-customer-select");
+const newCaseConflictAlert = document.getElementById("new-case-conflict-alert");
+const conflictAlertTitle = document.getElementById("conflict-alert-title");
+const conflictAlertMsg = document.getElementById("conflict-alert-msg");
+const btnConflictSwitch = document.getElementById("btn-conflict-switch");
+const btnConflictResolve = document.getElementById("btn-conflict-resolve");
+const newCaseIssueDesc = document.getElementById("new-case-issue-desc");
+const btnAiIntakeGenerate = document.getElementById("btn-ai-intake-generate");
+const aiBriefingCard = document.getElementById("ai-briefing-card");
+const newCaseTitleInput = document.getElementById("new-case-title-input");
+const newCaseCategorySelect = document.getElementById("new-case-category-select");
+const aiPriorityBadge = document.getElementById("ai-priority-badge");
+const aiDiagnosisText = document.getElementById("ai-diagnosis-text");
+const newCaseOpeningText = document.getElementById("new-case-opening-text");
+const btnCancelNewCase = document.getElementById("btn-cancel-new-case");
+const btnLaunchCaseSubmit = document.getElementById("btn-launch-case-submit");
+
+// Modal Elements: Resolve Case
+const resolveCaseModal = document.getElementById("resolve-case-modal");
+const btnCloseResolveModal = document.getElementById("btn-close-resolve-modal");
+const resolveModalCaseTitle = document.getElementById("resolve-modal-case-title");
+const resolveModalCaseConvId = document.getElementById("resolve-modal-case-conv-id");
+const btnAiSummarize = document.getElementById("btn-ai-summarize");
+const resolveSummaryInput = document.getElementById("resolve-summary-input");
+const btnCancelResolve = document.getElementById("btn-cancel-resolve");
+const btnConfirmResolve = document.getElementById("btn-confirm-resolve");
+
 // ============================================================================
-// 1. Initial Data Hydration
+// 1. Initial Data Hydration & Booking Fetch
 // ============================================================================
 
-async function fetchBookingDetails() {
+async function fetchBookingDetails(bookingRef = currentBookingRef) {
+  if (!bookingRef) return;
   try {
-    const res = await fetch(`/api/booking/${BOOKING_REF}`);
+    const res = await fetch(`/api/booking/${bookingRef}`);
     if (!res.ok) return;
     const data = await res.json();
 
-    cardFlightNum.textContent = data.flight_number;
-    cardAirline.textContent = data.airline;
-    cardSeat.textContent = data.seat;
+    const bookingBadge = document.getElementById("booking-badge");
+    if (bookingBadge) bookingBadge.textContent = data.booking_ref;
+    if (cardFlightNum) cardFlightNum.textContent = data.flight_number;
+    if (cardAirline) cardAirline.textContent = data.airline;
+    if (cardSeat) cardSeat.textContent = data.seat;
+    const cardPass = document.getElementById("card-passenger-name");
+    if (cardPass) cardPass.textContent = data.passenger_name;
+
+    const cardOrigCode = document.getElementById("card-origin-code");
+    const cardOrigCity = document.getElementById("card-origin-city");
+    const cardDestCode = document.getElementById("card-dest-code");
+    const cardDestCity = document.getElementById("card-dest-city");
+    if (cardOrigCode) cardOrigCode.textContent = data.origin_code;
+    if (cardOrigCity) cardOrigCity.textContent = data.origin_city;
+    if (cardDestCode) cardDestCode.textContent = data.dest_code;
+    if (cardDestCity) cardDestCity.textContent = data.dest_city;
+
+    if (cardStatusBadge) {
+      cardStatusBadge.textContent = data.flight_status;
+      cardStatusBadge.className = `status-badge status-${data.flight_status.toLowerCase().replace("_", "-")}`;
+    }
 
     const sched = new Date(data.scheduled_departure);
     const est = new Date(data.actual_departure);
-    cardSchedDep.textContent = `${sched.getUTCHours().toString().padStart(2, "0")}:${sched.getUTCMinutes().toString().padStart(2, "0")} UTC`;
-    cardEstDep.textContent = `${est.getUTCHours().toString().padStart(2, "0")}:${est.getUTCMinutes().toString().padStart(2, "0")} UTC`;
-
-    cardStatusBadge.textContent = data.flight_status;
-    cardStatusBadge.className = "status-badge " + (
-      data.flight_status === "DELAYED" ? "status-delayed" :
-      data.flight_status === "ON_TIME" ? "status-ontime" : "status-delayed"
-    );
+    if (cardSchedDep) {
+      cardSchedDep.textContent = `${sched.getUTCHours().toString().padStart(2, "0")}:${sched.getUTCMinutes().toString().padStart(2, "0")} UTC`;
+    }
+    if (cardEstDep) {
+      cardEstDep.textContent = `${est.getUTCHours().toString().padStart(2, "0")}:${est.getUTCMinutes().toString().padStart(2, "0")} UTC`;
+    }
   } catch (err) {
-    console.error("Failed to load booking details:", err);
+    console.error("fetchBookingDetails failed:", err);
   }
 }
 
-async function fetchAirportWeather(code = "DFW") {
+async function fetchAirportWeather(airportCode = "DFW") {
   try {
-    const res = await fetch(`/api/weather/${code}`);
+    const res = await fetch(`/api/weather/${airportCode}`);
     if (!res.ok) return;
-    const { weather, faa } = await res.json();
+    const data = await res.json();
 
-    weatherTemp.textContent = `${weather.temperatureC}°C`;
-    weatherDesc.textContent = weather.weatherDescription;
-    weatherWind.textContent = `${weather.windGustsKmh} km/h`;
-    weatherHumidity.textContent = `${weather.relativeHumidity}%`;
+    if (data.weather) {
+      weatherTemp.textContent = `${Math.round(data.weather.temperatureC)}°C`;
+      weatherDesc.textContent = data.weather.weatherDescription;
+      weatherWind.textContent = `${data.weather.windGustsKmh} km/h`;
+      weatherHumidity.textContent = `${data.weather.relativeHumidity}%`;
+    }
 
-    if (faa.hasGroundStop || faa.hasGroundDelayProgram) {
+    if (data.faa && data.faa.hasGroundStop) {
       faaBanner.style.display = "flex";
-      faaDetails.textContent = faa.groundStopReason || faa.gdpReason || "Traffic Management Flow Program active.";
+      faaDetails.textContent = data.faa.groundStopReason || "Ground Stop active due to severe thunderstorms.";
     } else {
       faaBanner.style.display = "none";
     }
   } catch (err) {
-    console.error("Failed to load weather:", err);
+    console.error("fetchAirportWeather failed:", err);
   }
 }
 
-async function fetchNotifications() {
+async function fetchNotifications(bookingRef = currentBookingRef) {
+  if (!bookingRef) return;
   try {
-    const res = await fetch(`/api/notifications/${BOOKING_REF}`);
+    const res = await fetch(`/api/notifications/${bookingRef}`);
     if (!res.ok) return;
     const logs = await res.json();
-    notifCountBadge.textContent = logs.length;
 
+    notifCountBadge.textContent = logs.length;
     if (logs.length === 0) {
-      notifList.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No alerts dispatched yet.</p>`;
+      notifList.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No alerts dispatched yet for booking ${escapeHtml(bookingRef)}.</p>`;
       return;
     }
 
     notifList.innerHTML = logs
       .map(
         (log) => `
-        <div class="notif-card">
-          <div class="notif-card-header">
-            <span><strong>${log.channel.toUpperCase()}</strong> ➔ ${log.recipient}</span>
-            <span>${new Date(log.sent_at).toLocaleTimeString()}</span>
-          </div>
-          <div class="notif-card-title">${log.title}</div>
-          <div class="notif-card-body">${log.body}</div>
-          <div style="font-size: 0.7rem; color: #10b981; margin-top: 0.35rem;">Status: ${log.delivery_status}</div>
+      <div class="notif-card">
+        <div class="notif-card-header">
+          <span>${log.channel.toUpperCase()} ➔ ${escapeHtml(log.recipient)}</span>
+          <span style="font-family: var(--font-mono);">${new Date(log.sent_at).toLocaleTimeString()}</span>
         </div>
-      `
+        <div class="notif-card-title">${escapeHtml(log.title)}</div>
+        <div class="notif-card-body">${escapeHtml(log.body)}</div>
+      </div>
+    `
       )
       .join("");
   } catch (err) {
-    console.error("Failed to load notifications:", err);
+    console.error("fetchNotifications failed:", err);
   }
 }
 
 // ============================================================================
-// 2. WebSocket Connection to Durable Object Agent
+// 2. Case Management & Active Conversation Switcher
+// ============================================================================
+
+async function loadConversation(convId, initialOpening = null) {
+  if (!convId) return;
+  currentConversationId = convId;
+  sessionStorage.setItem("aerocare_conv_id", convId);
+
+  try {
+    const res = await fetch(`/api/conversations/${convId}`);
+    if (res.ok) {
+      const conv = await res.json();
+      currentBookingRef = conv.booking_ref || "SKY-8842";
+      currentCustomerId = conv.customer_id;
+      currentCaseStatus = conv.status;
+
+      if (chatCaseTitle) chatCaseTitle.textContent = conv.title;
+      if (chatCustomerTag) chatCustomerTag.textContent = `👤 ${conv.customer_name} (${conv.customer_id})`;
+      if (chatConvIdTag) {
+        chatConvIdTag.textContent = conv.conversation_id;
+        chatConvIdTag.title = `Conversation ID: ${conv.conversation_id}`;
+      }
+
+      if (conv.status === "ACTIVE") {
+        if (chatStatusBadge) {
+          chatStatusBadge.className = "badge-status status-active";
+          chatStatusBadge.textContent = "● ACTIVE";
+        }
+        if (btnResolveChat) btnResolveChat.style.display = "inline-flex";
+        if (caseResolvedBanner) caseResolvedBanner.style.display = "none";
+        if (chatInput) {
+          chatInput.disabled = false;
+          chatInput.placeholder = "Type your message or request rebooking...";
+        }
+        if (btnSend) btnSend.disabled = false;
+        if (quickPromptsBar) quickPromptsBar.style.display = "flex";
+      } else {
+        if (chatStatusBadge) {
+          chatStatusBadge.className = "badge-status status-resolved";
+          chatStatusBadge.textContent = "✓ RESOLVED";
+        }
+        if (btnResolveChat) btnResolveChat.style.display = "none";
+        if (caseResolvedBanner) {
+          caseResolvedBanner.style.display = "flex";
+          if (resolvedSummaryText) {
+            resolvedSummaryText.textContent = conv.resolution_summary || "Customer concern successfully addressed.";
+          }
+        }
+        if (chatInput) {
+          chatInput.disabled = true;
+          chatInput.placeholder = "This case has been resolved and closed. Customer concern was successfully addressed.";
+        }
+        if (btnSend) btnSend.disabled = true;
+        if (quickPromptsBar) quickPromptsBar.style.display = "none";
+      }
+
+      if (currentBookingRef) {
+        fetchBookingDetails(currentBookingRef);
+        fetchNotifications(currentBookingRef);
+      }
+    }
+  } catch (err) {
+    console.error("loadConversation error:", err);
+  }
+
+  // Clear messages container and reconnect websocket to this unique conversation
+  if (messagesContainer) {
+    messagesContainer.innerHTML = "";
+  }
+  connectAgentWebSocket(currentConversationId);
+
+  // If initial opening message was provided (e.g. from new case creation), render it
+  if (initialOpening) {
+    setTimeout(() => {
+      if (messagesContainer && messagesContainer.children.length === 0) {
+        appendAgentMessage(initialOpening);
+      }
+    }, 250);
+  }
+}
+
+// ============================================================================
+// 3. Search Past Conversations
+// ============================================================================
+
+async function renderSearchResults(query = "") {
+  if (!casesResultsList) return;
+  casesResultsList.innerHTML = '<div style="padding: 1.5rem; text-align: center; color: var(--text-muted);">Searching conversations...</div>';
+
+  try {
+    let url = `/api/conversations?query=${encodeURIComponent(query)}`;
+    if (caseFilterStatus && caseFilterStatus !== "ALL") {
+      url += `&status=${caseFilterStatus}`;
+    }
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Search failed");
+    const data = await res.json();
+    const list = data.conversations || [];
+
+    if (list.length === 0) {
+      casesResultsList.innerHTML = `
+        <div style="padding: 2.5rem; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🔍</div>
+          <div>No conversations found matching "${escapeHtml(query)}".</div>
+          <div style="font-size: 0.75rem; margin-top: 0.35rem;">Try searching by Customer Name (e.g. Alex Mercer) or ID (e.g. P-101).</div>
+        </div>
+      `;
+      return;
+    }
+
+    casesResultsList.innerHTML = list
+      .map((c) => {
+        const isCurrent = c.conversation_id === currentConversationId;
+        const statusClass = c.status === "ACTIVE" ? "status-active" : "status-resolved";
+        const statusLabel = c.status === "ACTIVE" ? "🟢 ACTIVE" : "✓ RESOLVED";
+        const createdDate = new Date(c.created_at).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+        return `
+          <div class="case-result-card ${isCurrent ? "is-current" : ""}" data-conv-id="${escapeHtml(c.conversation_id)}">
+            <div class="case-result-header">
+              <div class="case-result-customer">
+                <span>👤 ${escapeHtml(c.customer_name)}</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); font-weight: normal;">(${escapeHtml(c.customer_id)})</span>
+                ${isCurrent ? '<span style="font-size: 0.68rem; color: #10b981; font-weight: 700;">(Current)</span>' : ""}
+              </div>
+              <span class="badge-status ${statusClass}">${statusLabel}</span>
+            </div>
+            <div class="case-result-title">
+              <strong>${escapeHtml(c.title)}</strong>
+            </div>
+            <div class="case-result-meta">
+              <span>✈️ ${c.flight_number ? escapeHtml(c.flight_number) : "Flight N/A"} • ${c.booking_ref ? escapeHtml(c.booking_ref) : "No Booking"}</span>
+              <span style="font-family: var(--font-mono);">${createdDate}</span>
+            </div>
+            ${
+              c.resolution_summary
+                ? `<div class="case-result-summary"><strong>Resolution:</strong> ${escapeHtml(c.resolution_summary)}</div>`
+                : ""
+            }
+          </div>
+        `;
+      })
+      .join("");
+
+    // Attach click listeners to cards
+    casesResultsList.querySelectorAll(".case-result-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const id = card.getAttribute("data-conv-id");
+        if (id) {
+          loadConversation(id);
+          if (searchCasesModal) searchCasesModal.style.display = "none";
+        }
+      });
+    });
+  } catch (err) {
+    casesResultsList.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: #ef4444;">Failed to load conversations: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function openSearchCasesModal() {
+  if (!searchCasesModal) return;
+  searchCasesModal.style.display = "flex";
+  if (caseSearchInput) {
+    caseSearchInput.value = "";
+    caseSearchInput.focus();
+  }
+  renderSearchResults("");
+}
+
+// Debounce timer for instant search
+let searchDebounceTimer = null;
+caseSearchInput?.addEventListener("input", (e) => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    renderSearchResults(e.target.value.trim());
+  }, 180);
+});
+
+caseStatusFilters?.querySelectorAll(".filter-pill").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    caseStatusFilters.querySelectorAll(".filter-pill").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    caseFilterStatus = btn.getAttribute("data-filter") || "ALL";
+    renderSearchResults(caseSearchInput ? caseSearchInput.value.trim() : "");
+  });
+});
+
+btnHeaderSearchCases?.addEventListener("click", openSearchCasesModal);
+btnChatSearch?.addEventListener("click", openSearchCasesModal);
+btnCloseSearchModal?.addEventListener("click", () => {
+  if (searchCasesModal) searchCasesModal.style.display = "none";
+});
+
+// ============================================================================
+// 4. Open New Support Case with AI (Enforces 1 Active Conv Per Customer)
+// ============================================================================
+
+async function openNewCaseModal() {
+  if (!newCaseModal) return;
+  newCaseModal.style.display = "flex";
+  if (aiBriefingCard) aiBriefingCard.style.display = "none";
+  if (newCaseConflictAlert) newCaseConflictAlert.style.display = "none";
+  if (btnLaunchCaseSubmit) btnLaunchCaseSubmit.disabled = false;
+  if (btnAiIntakeGenerate) btnAiIntakeGenerate.disabled = false;
+
+  try {
+    const res = await fetch("/api/passengers");
+    if (res.ok) {
+      allPassengersList = await res.json();
+      if (newCaseCustomerSelect) {
+        newCaseCustomerSelect.innerHTML = `
+          <option value="">-- Choose a Customer Profile --</option>
+          ${allPassengersList
+            .map(
+              (p) => `
+            <option value="${escapeHtml(p.passenger_id)}" data-active="${escapeHtml(p.active_conversation_id || "")}" data-booking="${escapeHtml(p.booking_ref || "")}">
+              ${escapeHtml(p.name)} (${escapeHtml(p.passenger_id)}) — ${p.booking_ref ? `Booking: ${escapeHtml(p.booking_ref)} (${escapeHtml(p.flight_number || "")})` : "No Booking"} ${p.active_conversation_id ? "⚠️ [Active Case Open]" : "✓ [Available]"}
+            </option>
+          `
+            )
+            .join("")}
+        `;
+      }
+    }
+  } catch (err) {
+    console.error("fetch passengers failed:", err);
+  }
+}
+
+newCaseCustomerSelect?.addEventListener("change", () => {
+  const selectedOpt = newCaseCustomerSelect.selectedOptions[0];
+  if (!selectedOpt || !selectedOpt.value) {
+    if (newCaseConflictAlert) newCaseConflictAlert.style.display = "none";
+    if (btnLaunchCaseSubmit) btnLaunchCaseSubmit.disabled = false;
+    return;
+  }
+
+  const activeConvId = selectedOpt.getAttribute("data-active");
+  if (activeConvId) {
+    const custName = selectedOpt.textContent.split("(")[0].trim();
+    if (conflictAlertTitle) {
+      conflictAlertTitle.textContent = `${custName} already has an active conversation!`;
+    }
+    if (conflictAlertMsg) {
+      conflictAlertMsg.textContent = `A customer can only have 1 active conversation at a time. Active Case ID: ${activeConvId}. Please switch to the active case or resolve it before opening a new one.`;
+    }
+    if (newCaseConflictAlert) newCaseConflictAlert.style.display = "flex";
+    if (btnLaunchCaseSubmit) btnLaunchCaseSubmit.disabled = true;
+    if (btnAiIntakeGenerate) btnAiIntakeGenerate.disabled = true;
+
+    btnConflictSwitch.onclick = () => {
+      newCaseModal.style.display = "none";
+      loadConversation(activeConvId);
+    };
+
+    btnConflictResolve.onclick = () => {
+      newCaseModal.style.display = "none";
+      loadConversation(activeConvId).then(() => {
+        openResolveModal();
+      });
+    };
+  } else {
+    if (newCaseConflictAlert) newCaseConflictAlert.style.display = "none";
+    if (btnLaunchCaseSubmit) btnLaunchCaseSubmit.disabled = false;
+    if (btnAiIntakeGenerate) btnAiIntakeGenerate.disabled = false;
+  }
+});
+
+// Quick issue preset chips
+document.querySelectorAll(".preset-chip").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (newCaseIssueDesc) {
+      newCaseIssueDesc.value = btn.getAttribute("data-preset") || "";
+    }
+  });
+});
+
+btnAiIntakeGenerate?.addEventListener("click", async () => {
+  const custId = newCaseCustomerSelect?.value;
+  if (!custId) {
+    alert("Please select a customer first.");
+    return;
+  }
+
+  const selectedOpt = newCaseCustomerSelect.selectedOptions[0];
+  const bookingRef = selectedOpt?.getAttribute("data-booking") || undefined;
+  const issueDescription = newCaseIssueDesc?.value.trim() || "Severe thunderstorm delay rebooking";
+
+  btnAiIntakeGenerate.textContent = "⏳ Generating Case Intake with AI...";
+  btnAiIntakeGenerate.disabled = true;
+
+  try {
+    const res = await fetch("/api/cases/ai-intake", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customerId: custId, bookingRef, issueDescription }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Failed to generate AI intake");
+      return;
+    }
+
+    if (newCaseTitleInput) newCaseTitleInput.value = data.title;
+    if (newCaseCategorySelect) newCaseCategorySelect.value = data.issueCategory || "WEATHER_DELAY";
+    if (aiPriorityBadge) aiPriorityBadge.textContent = `${data.priority || "HIGH"} PRIORITY`;
+    if (aiDiagnosisText) aiDiagnosisText.textContent = data.aiDiagnosis;
+    if (newCaseOpeningText) {
+      const suggestionsText = (data.suggestedActions || [])
+        .map((act) => `- ${act} | Please assist with: ${act}`)
+        .join("\n");
+      newCaseOpeningText.value = `${data.openingMessage}\n\n<suggestions>\n${suggestionsText}\n</suggestions>`;
+    }
+
+    if (aiBriefingCard) aiBriefingCard.style.display = "block";
+  } catch (err) {
+    alert("AI intake generation failed: " + err.message);
+  } finally {
+    btnAiIntakeGenerate.textContent = "✨ Generate Case Intake & Briefing with AI";
+    btnAiIntakeGenerate.disabled = false;
+  }
+});
+
+btnLaunchCaseSubmit?.addEventListener("click", async () => {
+  const custId = newCaseCustomerSelect?.value;
+  if (!custId) {
+    alert("Please select a customer profile.");
+    return;
+  }
+
+  const selectedOpt = newCaseCustomerSelect.selectedOptions[0];
+  const bookingRef = selectedOpt?.getAttribute("data-booking") || null;
+  const title = newCaseTitleInput?.value.trim() || newCaseIssueDesc?.value.trim() || "Flight Disruption Support Case";
+  const issueCategory = newCaseCategorySelect?.value || "WEATHER_DELAY";
+  const openingMessage = newCaseOpeningText?.value.trim();
+
+  btnLaunchCaseSubmit.textContent = "🚀 Launching...";
+  btnLaunchCaseSubmit.disabled = true;
+
+  try {
+    const res = await fetch("/api/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customerId: custId, bookingRef, title, issueCategory }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Failed to create case");
+      return;
+    }
+
+    newCaseModal.style.display = "none";
+    await loadConversation(data.conversation.conversation_id, openingMessage);
+  } catch (err) {
+    alert("Failed to launch case: " + err.message);
+  } finally {
+    btnLaunchCaseSubmit.textContent = "🚀 Launch Case & Open Chat";
+    btnLaunchCaseSubmit.disabled = false;
+  }
+});
+
+btnHeaderNewCase?.addEventListener("click", openNewCaseModal);
+btnChatNew?.addEventListener("click", openNewCaseModal);
+btnResolvedNewCase?.addEventListener("click", openNewCaseModal);
+btnCloseNewCaseModal?.addEventListener("click", () => {
+  if (newCaseModal) newCaseModal.style.display = "none";
+});
+btnCancelNewCase?.addEventListener("click", () => {
+  if (newCaseModal) newCaseModal.style.display = "none";
+});
+
+// ============================================================================
+// 5. Resolve & End Chat Flow
+// ============================================================================
+
+function openResolveModal() {
+  if (!resolveCaseModal) return;
+  if (resolveModalCaseTitle) {
+    resolveModalCaseTitle.textContent = chatCaseTitle?.textContent || "Current Case";
+  }
+  if (resolveModalCaseConvId) {
+    resolveModalCaseConvId.textContent = `${currentConversationId} • ${chatCustomerTag?.textContent || ""}`;
+  }
+  if (resolveSummaryInput) {
+    resolveSummaryInput.value = "";
+  }
+  resolveCaseModal.style.display = "flex";
+}
+
+btnResolveChat?.addEventListener("click", openResolveModal);
+btnCloseResolveModal?.addEventListener("click", () => {
+  if (resolveCaseModal) resolveCaseModal.style.display = "none";
+});
+btnCancelResolve?.addEventListener("click", () => {
+  if (resolveCaseModal) resolveCaseModal.style.display = "none";
+});
+
+btnAiSummarize?.addEventListener("click", async () => {
+  if (!btnAiSummarize) return;
+  btnAiSummarize.textContent = "⏳ Generating...";
+  btnAiSummarize.disabled = true;
+
+  try {
+    const res = await fetch("/api/cases/ai-summarize-resolution", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId: currentConversationId }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (resolveSummaryInput) resolveSummaryInput.value = data.summary;
+    }
+  } catch (err) {
+    console.error("AI summarize error:", err);
+  } finally {
+    btnAiSummarize.textContent = "✨ Generate AI Summary";
+    btnAiSummarize.disabled = false;
+  }
+});
+
+btnConfirmResolve?.addEventListener("click", async () => {
+  const summary = resolveSummaryInput?.value.trim() || "Customer concern successfully addressed and resolved.";
+  btnConfirmResolve.textContent = "✓ Resolving...";
+  btnConfirmResolve.disabled = true;
+
+  try {
+    const res = await fetch(`/api/conversations/${currentConversationId}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolutionSummary: summary }),
+    });
+
+    if (res.ok) {
+      resolveCaseModal.style.display = "none";
+      await loadConversation(currentConversationId);
+    } else {
+      const data = await res.json();
+      alert(data.error || "Failed to resolve conversation");
+    }
+  } catch (err) {
+    alert("Failed to resolve conversation: " + err.message);
+  } finally {
+    btnConfirmResolve.textContent = "✓ Confirm Resolution & Close Chat";
+    btnConfirmResolve.disabled = false;
+  }
+});
+
+// ============================================================================
+// 6. WebSocket Protocol & Streaming Engine
 // ============================================================================
 
 let currentThinkingBubble = null;
@@ -271,14 +804,14 @@ function getFallbackSuggestions(text = "") {
   const lower = text.toLowerCase();
   if (lower.includes("rebook") && (lower.includes("confirm") || lower.includes("success") || lower.includes("updated"))) {
     return [
-      { label: "Confirm Updated Itinerary", prompt: "Please confirm my updated itinerary for booking SKY-8842." },
+      { label: "Confirm Updated Itinerary", prompt: "Please confirm my updated itinerary for my booking." },
       { label: "Check In & Boarding Info", prompt: "What time does boarding start for my rebooked flight?" },
       { label: "Set Up SMS Flight Alerts", prompt: "Register my phone +15125550199 for automated SMS updates on my new flight." },
     ];
   }
   if (lower.includes("weather") || lower.includes("storm") || lower.includes("radar") || lower.includes("faa")) {
     return [
-      { label: "Find Flights to Chicago", prompt: "Find me alternative flights to Chicago with open seats." },
+      { label: "Find Alternative Flights", prompt: "Find me alternative flights to my destination with open seats." },
       { label: "Rebook on AA2040 (18:45 UTC)", prompt: "Please rebook me onto flight AA2040 departing at 18:45 UTC." },
       { label: "Set Up SMS Delay Alerts", prompt: "Please text me updates at +15125550199 if anything changes." },
     ];
@@ -287,12 +820,12 @@ function getFallbackSuggestions(text = "") {
     return [
       { label: "Rebook to AA2040 (18:45 UTC)", prompt: "Please rebook me onto flight AA2040 departing at 18:45 UTC." },
       { label: "Rebook to AA912 (17:30 UTC)", prompt: "Please rebook me onto flight AA912 departing at 17:30 UTC." },
-      { label: "Check DFW Storm Radar", prompt: "What is the latest weather and radar report at DFW?" },
+      { label: "Check Airport Storm Radar", prompt: "What is the latest weather and FAA advisory report?" },
     ];
   }
   return [
-    { label: "Check AA1822 Delay & Weather", prompt: "Why is my flight AA1822 delayed and what is the DFW weather?" },
-    { label: "Find Alternative Flights", prompt: "Find me alternative flights to Chicago with open seats." },
+    { label: "Check Delay & Weather", prompt: "Why is my flight delayed and what are the airport weather conditions?" },
+    { label: "Find Alternative Flights", prompt: "Find me alternative flights with open seats." },
     { label: "Set Up SMS Delay Alerts", prompt: "Please text me updates at +15125550199 if anything changes." },
   ];
 }
@@ -402,16 +935,26 @@ function extractTextAndMetaFromStreamBody(body) {
   return { text: extracted, messageId };
 }
 
-function connectAgentWebSocket() {
+function connectAgentWebSocket(convId = currentConversationId) {
+  if (ws) {
+    try {
+      ws.close();
+    } catch {}
+  }
+
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/agents/support-agent/${BOOKING_REF}`;
+  const wsUrl = `${protocol}//${window.location.host}/agents/support-agent/${convId}`;
 
   console.log(`[Agent Client] Connecting to ${wsUrl}...`);
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
-    console.log("[Agent Client] Connected to SupportAgent Durable Object.");
+    console.log(`[Agent Client] Connected to SupportAgent (${convId}).`);
     clearTimeout(reconnectTimer);
+    if (agentStatusDot) {
+      agentStatusDot.style.background = "#10b981";
+      agentStatusDot.style.boxShadow = "0 0 8px #10b981";
+    }
   };
 
   ws.onmessage = (event) => {
@@ -461,7 +1004,7 @@ function connectAgentWebSocket() {
             if (currentResponseBubble) {
               const bodyEl = currentResponseBubble.querySelector(".message-body");
               if (!currentAccumulatedText.trim()) {
-                currentAccumulatedText = "I have reviewed your booking SKY-8842 and flight AA1822. Your flight is currently delayed by 180 minutes due to convective thunderstorms and an active FAA Ground Stop at DFW. We have confirmed open seats on alternative flights: **AA2040** (departing 18:45 UTC, 8 seats open) and **AA912** (departing 17:30 UTC, 5 seats open).\n\n<suggestions>\n- Rebook on AA2040 (18:45 UTC) | Please rebook me on flight AA2040.\n- Check DFW Weather & Radar | What is the current FAA ground delay and weather at DFW?\n- Register for SMS Alerts | Register +15125550199 for SMS flight disruption alerts.\n</suggestions>";
+                currentAccumulatedText = "I have reviewed your itinerary and current flight operations. Severe weather or flow control is impacting schedule integrity. How can I assist you with rebooking or checking alternative flights?";
               }
 
               const { cleanText, suggestions } = parseSuggestions(currentAccumulatedText);
@@ -528,8 +1071,12 @@ function connectAgentWebSocket() {
   };
 
   ws.onclose = () => {
-    console.warn("[Agent Client] WebSocket closed, retrying in 3s...");
-    reconnectTimer = setTimeout(connectAgentWebSocket, 3000);
+    console.warn(`[Agent Client] WebSocket closed for ${convId}, retrying in 3s...`);
+    if (agentStatusDot) {
+      agentStatusDot.style.background = "#f59e0b";
+      agentStatusDot.style.boxShadow = "none";
+    }
+    reconnectTimer = setTimeout(() => connectAgentWebSocket(currentConversationId), 3000);
   };
 
   ws.onerror = (err) => {
@@ -538,7 +1085,7 @@ function connectAgentWebSocket() {
 }
 
 // ============================================================================
-// 3. UI Message Rendering
+// 7. UI Message Rendering
 // ============================================================================
 
 function appendUserMessage(text) {
@@ -611,7 +1158,7 @@ function renderFullHistory(messages) {
     } else if (msg.role === "assistant") {
       let text = msg.parts?.find((p) => p.type === "text")?.text || "";
       if (!text && msg.parts && msg.parts.length > 0) {
-        text = "I reviewed your flight details for booking SKY-8842. Flight AA1822 is delayed by 180 minutes due to convective thunderstorms at DFW. Alternative flights **AA2040** (18:45 UTC) and **AA912** (17:30 UTC) are available with open seats.";
+        text = "I reviewed your flight details. Flight AA1822 is delayed by 180 minutes due to convective thunderstorms at DFW. Alternative flights **AA2040** (18:45 UTC) and **AA912** (17:30 UTC) are available with open seats.";
       }
       if (text) appendAgentMessage(text, msg.id);
     }
@@ -636,11 +1183,16 @@ function formatMarkdown(text) {
 }
 
 // ============================================================================
-// 4. Chat Submission & Event Handlers
+// 8. Chat Submission & Event Handlers
 // ============================================================================
 
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (currentCaseStatus === "RESOLVED") {
+    alert("This case has been resolved and closed. Please open a new case to start a new inquiry.");
+    return;
+  }
+
   const text = chatInput.value.trim();
   if (!text) return;
 
@@ -677,21 +1229,22 @@ chatForm.addEventListener("submit", async (e) => {
     ws.send(JSON.stringify(payload));
   } else {
     appendAgentMessage("Reconnecting to flight operations server... Please try again in a moment.");
-    connectAgentWebSocket();
+    connectAgentWebSocket(currentConversationId);
   }
 });
 
 // Quick action prompt chips
 document.querySelectorAll(".prompt-chip").forEach((btn) => {
   btn.addEventListener("click", () => {
+    if (currentCaseStatus === "RESOLVED") return;
     chatInput.value = btn.getAttribute("data-prompt") || "";
     chatForm.dispatchEvent(new Event("submit"));
   });
 });
 
-// Modal Toggles
+// Modal Toggles: Notifications
 btnOpenNotif.addEventListener("click", () => {
-  fetchNotifications();
+  fetchNotifications(currentBookingRef);
   notifModal.style.display = "flex";
 });
 
@@ -703,8 +1256,15 @@ notifModal.addEventListener("click", (e) => {
   if (e.target === notifModal) notifModal.style.display = "none";
 });
 
+// Modal Outside Click Close
+window.addEventListener("click", (e) => {
+  if (e.target === searchCasesModal) searchCasesModal.style.display = "none";
+  if (e.target === newCaseModal) newCaseModal.style.display = "none";
+  if (e.target === resolveCaseModal) resolveCaseModal.style.display = "none";
+});
+
 // ============================================================================
-// 5. Simulation Action Handlers
+// 9. Simulation Action Handlers
 // ============================================================================
 
 async function triggerSimulation(flightNumber, status, reason) {
@@ -717,9 +1277,9 @@ async function triggerSimulation(flightNumber, status, reason) {
 
     if (res.ok) {
       await Promise.all([
-        fetchBookingDetails(),
+        fetchBookingDetails(currentBookingRef),
         fetchAirportWeather(),
-        fetchNotifications(),
+        fetchNotifications(currentBookingRef),
       ]);
     }
   } catch (err) {
@@ -748,12 +1308,10 @@ btnQuickRestore.addEventListener("click", () => {
 });
 
 // ============================================================================
-// 6. Bootstrap
+// 10. Bootstrap Application
 // ============================================================================
 
 attachCardClickHandlers(messagesContainer);
 attachCopyHandlers(messagesContainer);
-fetchBookingDetails();
 fetchAirportWeather("DFW");
-fetchNotifications();
-connectAgentWebSocket();
+loadConversation(currentConversationId);

@@ -82,6 +82,42 @@ export interface NotificationLog {
 }
 
 // ============================================================================
+// Case & Conversation Lifecycle Models
+// ============================================================================
+
+export type ConversationStatus = "ACTIVE" | "RESOLVED";
+
+export type IssueCategory =
+  | "WEATHER_DELAY"
+  | "REBOOKING"
+  | "CANCELLATION"
+  | "BAGGAGE"
+  | "GENERAL";
+
+export interface Conversation {
+  conversation_id: string;
+  customer_id: string;
+  booking_ref?: string | null;
+  title: string;
+  issue_category: IssueCategory;
+  status: ConversationStatus;
+  resolution_summary?: string | null;
+  created_at: string;
+  resolved_at?: string | null;
+}
+
+export interface ConversationWithDetails extends Conversation {
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string;
+  flight_number?: string | null;
+  flight_status?: FlightStatus | null;
+  airline?: string | null;
+  origin_city?: string | null;
+  dest_city?: string | null;
+}
+
+// ============================================================================
 // External API Response Models
 // ============================================================================
 

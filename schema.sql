@@ -67,9 +67,29 @@ CREATE TABLE IF NOT EXISTS notification_logs (
 );
 
 -- Create Indexes for performance
+-- Case Conversations History & Unique Active State Tracking
+CREATE TABLE IF NOT EXISTS conversations (
+  conversation_id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES passengers(passenger_id),
+  booking_ref TEXT REFERENCES bookings(booking_ref),
+  title TEXT NOT NULL,
+  issue_category TEXT NOT NULL CHECK (issue_category IN ('WEATHER_DELAY', 'REBOOKING', 'CANCELLATION', 'BAGGAGE', 'GENERAL')),
+  status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'RESOLVED')),
+  resolution_summary TEXT,
+  created_at TEXT NOT NULL,           -- ISO-8601 UTC
+  resolved_at TEXT                    -- ISO-8601 UTC
+);
+
+-- Indexes for lightning fast customer search & status lookups
 CREATE INDEX IF NOT EXISTS idx_flights_route ON flights(origin_code, dest_code, status);
 CREATE INDEX IF NOT EXISTS idx_bookings_passenger ON bookings(passenger_id);
 CREATE INDEX IF NOT EXISTS idx_alert_subs_booking ON alert_subscriptions(booking_ref);
+CREATE INDEX IF NOT EXISTS idx_conversations_customer ON conversations(customer_id, status);
+CREATE INDEX IF NOT EXISTS idx_conversations_booking ON conversations(booking_ref);
+CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
+
+-- Database-enforced rule: A customer can only have 1 active conversation at a time
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_customer_conv ON conversations(customer_id) WHERE status = 'ACTIVE';
 
 -- ============================================================================
 -- Realistic Disruption Scenario Seed Data (DFW & ORD Severe Thunderstorms)
@@ -94,14 +114,25 @@ INSERT OR REPLACE INTO flights (flight_number, airline, origin_code, dest_code, 
 
 INSERT OR REPLACE INTO passengers (passenger_id, name, email, phone) VALUES
   ('P-101', 'Alex Mercer', 'alex.mercer@example.com', '+15125550199'),
-  ('P-102', 'Elena Rostova', 'elena.rostova@example.com', '+14155550244');
+  ('P-102', 'Elena Rostova', 'elena.rostova@example.com', '+14155550244'),
+  ('P-103', 'Marcus Vance', 'marcus.vance@example.com', '+13125550388'),
+  ('P-104', 'Sarah Chen', 'sarah.chen@example.com', '+12125550477');
 
 INSERT OR REPLACE INTO bookings (booking_ref, passenger_id, flight_number, seat, status, updated_at) VALUES
   ('SKY-8842', 'P-101', 'AA1822', '14B', 'CONFIRMED', '2026-10-13T12:00:00Z'),
-  ('SKY-1904', 'P-102', 'UA450',  '03A', 'CONFIRMED', '2026-10-13T10:00:00Z');
+  ('SKY-1904', 'P-102', 'UA450',  '03A', 'CONFIRMED', '2026-10-13T10:00:00Z'),
+  ('SKY-3301', 'P-103', 'AA3301', '18C', 'CONFIRMED', '2026-10-13T11:00:00Z'),
+  ('SKY-1102', 'P-104', 'DL1102', '08D', 'CONFIRMED', '2026-10-13T09:30:00Z');
 
 INSERT OR REPLACE INTO alert_subscriptions (id, booking_ref, channel, recipient, last_notified_status, created_at) VALUES
   ('SUB-001', 'SKY-8842', 'sms', '+15125550199', 'INITIAL', '2026-10-13T12:00:00Z'),
   ('SUB-002', 'SKY-8842', 'email', 'alex.mercer@example.com', 'INITIAL', '2026-10-13T12:00:00Z');
+
+-- Initial Active & Historical Resolved Case Conversations
+INSERT OR REPLACE INTO conversations (conversation_id, customer_id, booking_ref, title, issue_category, status, resolution_summary, created_at, resolved_at) VALUES
+  ('conv_p101_active', 'P-101', 'SKY-8842', 'Flight AA1822 Severe Storm Delay Rebooking', 'WEATHER_DELAY', 'ACTIVE', NULL, '2026-10-13T13:00:00Z', NULL),
+  ('conv_p101_past_01', 'P-101', 'SKY-8842', 'Checked Baggage Allowance & Sports Equipment Inquiry', 'BAGGAGE', 'RESOLVED', 'Provided passenger with oversized baggage fee waivers and checked bag size limits for ski equipment.', '2026-09-12T08:30:00Z', '2026-09-12T08:45:00Z'),
+  ('conv_p102_past_01', 'P-102', 'SKY-1904', 'Flight UA450 Preferred Seat Selection', 'REBOOKING', 'RESOLVED', 'Passenger confirmed and assigned to window seat 03A on flight UA450 from ORD to SFO.', '2026-10-10T14:15:00Z', '2026-10-10T14:28:00Z'),
+  ('conv_p103_past_01', 'P-103', 'SKY-3301', 'Special Inflight Meal Dietary Request', 'GENERAL', 'RESOLVED', 'Recorded gluten-free dietary meal request for passenger on flight AA3301.', '2026-10-11T09:00:00Z', '2026-10-11T09:12:00Z');
 
 

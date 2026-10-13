@@ -18,6 +18,12 @@
       </div>
     </div>
     <div class="header-actions">
+      <button id="btn-header-search-cases" class="btn-secondary" title="Search past customer conversations">
+        🔍 Search Cases
+      </button>
+      <button id="btn-header-new-case" class="btn-secondary" style="border-color: rgba(246, 130, 31, 0.4); color: var(--cf-orange);" title="Open a new customer support case with AI">
+        ✨ + Open New Case
+      </button>
       <button id="btn-open-notifications" class="btn-secondary" title="View SMS and Email Outbox">
         📬 Alerts Outbox (<span id="notif-count">0</span>)
       </button>
@@ -119,14 +125,46 @@
 
     <!-- Right Area: Interactive Agent Chat -->
     <section class="chat-container">
+      <!-- Active Case Operations Header -->
       <div class="chat-header">
-        <div class="agent-status-indicator">
-          <div class="status-dot"></div>
-          <span>AeroCare AI Assistant • Llama 3.3 Connected</span>
+        <div class="chat-header-left">
+          <div class="agent-status-indicator">
+            <div class="status-dot" id="agent-status-dot"></div>
+            <span id="chat-case-title" style="font-weight: 600;">Flight AA1822 Severe Storm Delay Rebooking</span>
+          </div>
+          <div class="case-meta-tags">
+            <span class="badge-customer" id="chat-customer-tag">👤 Alex Mercer (P-101)</span>
+            <span class="badge-conv-id" id="chat-conv-id-tag" title="Unique Conversation ID">conv_p101_active</span>
+            <span class="badge-status status-active" id="chat-status-badge">● ACTIVE</span>
+          </div>
         </div>
-        <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">
-          Session: <strong style="color: var(--text-main);">SKY-8842</strong>
+        <div class="chat-header-actions">
+          <button id="btn-resolve-chat" class="btn-resolve-action" title="Resolve and end chat signifying customer concern was successfully addressed" type="button">
+            ✓ Resolve & End Chat
+          </button>
+          <button id="btn-chat-search" class="btn-chat-tool" title="Search all customer conversations" type="button">
+            🔍 Cases
+          </button>
+          <button id="btn-chat-new" class="btn-chat-tool" title="Open new support case with AI" type="button">
+            ✨ New Case
+          </button>
         </div>
+      </div>
+
+      <!-- Case Resolved Notice Banner (Shown when viewing a resolved case) -->
+      <div class="case-resolved-banner" id="case-resolved-banner" style="display: none;">
+        <div class="resolved-banner-icon">✓</div>
+        <div class="resolved-banner-content">
+          <div class="resolved-banner-title">
+            <strong>Case Resolved & Closed</strong> • Customer concern was successfully addressed.
+          </div>
+          <div class="resolved-banner-summary" id="resolved-summary-text">
+            Customer assistance completed.
+          </div>
+        </div>
+        <button class="btn-resolved-new-case" id="btn-resolved-new-case" type="button">
+          + Open New Case
+        </button>
       </div>
 
       <div class="messages-scroll" id="messages-container">
@@ -200,6 +238,213 @@
       </form>
     </section>
   </main>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 1: Search Past Conversations by Customer Name / ID / Conversation ID -->
+  <!-- ========================================================================= -->
+  <div class="modal-overlay" id="search-cases-modal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <div>
+          <h3 style="font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span>🔍 Customer Case & Conversation History</span>
+          </h3>
+          <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
+            Search past conversations by customer name, customer ID, or conversation ID.
+          </p>
+        </div>
+        <button class="btn-close-modal" id="btn-close-search-modal" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="search-filter-bar">
+          <div class="search-input-wrapper">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input 
+              type="text" 
+              id="case-search-input" 
+              placeholder="Search by customer name (e.g. Alex Mercer) or customer ID (e.g. P-101)..." 
+              autocomplete="off"
+            />
+          </div>
+          <div class="filter-pills" id="case-status-filters">
+            <button class="filter-pill active" data-filter="ALL" type="button">All Cases</button>
+            <button class="filter-pill" data-filter="ACTIVE" type="button">🟢 Active Only</button>
+            <button class="filter-pill" data-filter="RESOLVED" type="button">✓ Resolved Only</button>
+          </div>
+        </div>
+
+        <div class="cases-results-container" id="cases-results-list">
+          <div style="padding: 2rem; text-align: center; color: var(--text-muted);">
+            Loading customer conversations...
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 2: Open New Support Case with AI (Enforces 1 Active Conv Per Customer) -->
+  <!-- ========================================================================= -->
+  <div class="modal-overlay" id="new-case-modal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <div>
+          <h3 style="font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span>✨ Open New Support Case with AI</span>
+          </h3>
+          <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
+            AI-assisted case intake. Business rule: A customer can only have 1 active conversation at a time.
+          </p>
+        </div>
+        <button class="btn-close-modal" id="btn-close-new-case-modal" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <!-- 1. Customer Selector -->
+        <div class="form-group">
+          <label class="form-label" for="new-case-customer-select">Select Customer Profile:</label>
+          <select id="new-case-customer-select" class="form-select">
+            <option value="">-- Choose a Customer --</option>
+          </select>
+        </div>
+
+        <!-- Constraint Conflict Alert Banner (Shown if customer already has active case) -->
+        <div class="conflict-alert-box" id="new-case-conflict-alert" style="display: none;">
+          <div class="conflict-alert-icon">⚠️</div>
+          <div class="conflict-alert-text">
+            <strong id="conflict-alert-title">Customer already has an active conversation!</strong>
+            <p id="conflict-alert-msg" style="margin-top: 0.25rem; font-size: 0.8rem;"></p>
+            <div class="conflict-actions" style="margin-top: 0.6rem; display: flex; gap: 0.5rem;">
+              <button class="btn-conflict-action" id="btn-conflict-switch" type="button">
+                ➔ Switch to Active Case
+              </button>
+              <button class="btn-conflict-action btn-conflict-resolve" id="btn-conflict-resolve" type="button">
+                ✓ Resolve Existing Case First
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Customer Issue / Request Prompt -->
+        <div class="form-group" id="group-issue-desc">
+          <label class="form-label" for="new-case-issue-desc">Passenger Issue or Request Details:</label>
+          <textarea 
+            id="new-case-issue-desc" 
+            class="form-textarea" 
+            rows="2" 
+            placeholder="e.g. Passenger flight AA1822 delayed by 3 hours due to thunderstorms. Needs immediate alternative flight to Chicago."
+          ></textarea>
+          <div class="quick-preset-chips" style="margin-top: 0.4rem; display: flex; gap: 0.35rem; flex-wrap: wrap;">
+            <button class="preset-chip" type="button" data-preset="Flight AA1822 delayed 180 min by severe thunderstorms at DFW. Needs rebooking to Chicago with open seats.">Thunderstorm Delay</button>
+            <button class="preset-chip" type="button" data-preset="Flight cancellation assistance and travel waiver query due to adverse weather.">Flight Cancellation</button>
+            <button class="preset-chip" type="button" data-preset="Inquiry regarding checked baggage fees, ski equipment allowances, and carry-on rules.">Baggage Inquiry</button>
+            <button class="preset-chip" type="button" data-preset="Request preferred window seat selection and special meal confirmation.">Seat & Meal Request</button>
+          </div>
+        </div>
+
+        <!-- 3. AI Intake Generator Trigger -->
+        <div style="margin: 0.85rem 0;" id="ai-intake-btn-row">
+          <button class="btn-ai-intake" id="btn-ai-intake-generate" type="button">
+            ✨ Generate Case Intake & Briefing with AI
+          </button>
+        </div>
+
+        <!-- 4. AI Intake Briefing Results (Populated by Llama 3.3) -->
+        <div class="ai-briefing-card" id="ai-briefing-card" style="display: none;">
+          <div class="ai-briefing-header">
+            <span>🤖 AI Case Intake Briefing</span>
+            <span class="badge-priority" id="ai-priority-badge">HIGH PRIORITY</span>
+          </div>
+          <div class="ai-briefing-grid">
+            <div>
+              <label class="form-label">Case Title:</label>
+              <input type="text" id="new-case-title-input" class="form-input" />
+            </div>
+            <div>
+              <label class="form-label">Issue Category:</label>
+              <select id="new-case-category-select" class="form-select">
+                <option value="WEATHER_DELAY">Weather Delay</option>
+                <option value="REBOOKING">Rebooking</option>
+                <option value="CANCELLATION">Cancellation</option>
+                <option value="BAGGAGE">Baggage</option>
+                <option value="GENERAL">General Support</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top: 0.65rem;">
+            <label class="form-label">AI Diagnostic & Recommendation:</label>
+            <div class="ai-diagnosis-box" id="ai-diagnosis-text"></div>
+          </div>
+          <div style="margin-top: 0.65rem;">
+            <label class="form-label">Initial Opening Response to Passenger:</label>
+            <textarea id="new-case-opening-text" class="form-textarea" rows="2"></textarea>
+          </div>
+        </div>
+
+        <!-- 5. Submit Launch Case -->
+        <div style="margin-top: 1.25rem; display: flex; justify-content: flex-end; gap: 0.5rem;">
+          <button class="btn-secondary" id="btn-cancel-new-case" type="button">Cancel</button>
+          <button class="btn-primary" id="btn-launch-case-submit" type="button">
+            🚀 Launch Case & Open Chat
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 3: Resolve & End Chat (Signifying Customer Concern Was Addressed)   -->
+  <!-- ========================================================================= -->
+  <div class="modal-overlay" id="resolve-case-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3 style="font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; color: #10b981;">
+            <span>✓ Resolve & End Customer Case</span>
+          </h3>
+          <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
+            Signifies the passenger concern was successfully addressed and closes this chat session.
+          </p>
+        </div>
+        <button class="btn-close-modal" id="btn-close-resolve-modal" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="case-resolve-summary-card">
+          <div style="font-size: 0.8rem; color: var(--text-muted);">Current Case:</div>
+          <div style="font-weight: 600; font-size: 0.95rem; margin-top: 0.15rem;" id="resolve-modal-case-title">
+            Flight AA1822 Weather Disruption Rebooking
+          </div>
+          <div style="font-size: 0.75rem; color: var(--cf-orange); font-family: var(--font-mono); margin-top: 0.25rem;" id="resolve-modal-case-conv-id">
+            conv_p101_active • Passenger: Alex Mercer (P-101)
+          </div>
+        </div>
+
+        <div style="margin-top: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+            <label class="form-label" style="margin: 0;" for="resolve-summary-input">Resolution Summary / Notes:</label>
+            <button class="btn-ai-summarize" id="btn-ai-summarize" type="button">
+              ✨ Generate AI Summary
+            </button>
+          </div>
+          <textarea 
+            id="resolve-summary-input" 
+            class="form-textarea" 
+            rows="3" 
+            placeholder="Summarize the action taken and how customer concern was addressed..."
+          ></textarea>
+        </div>
+
+        <div style="margin-top: 1.25rem; display: flex; justify-content: flex-end; gap: 0.5rem;">
+          <button class="btn-secondary" id="btn-cancel-resolve" type="button">Cancel</button>
+          <button class="btn-primary" id="btn-confirm-resolve" style="background: linear-gradient(135deg, #10b981, #059669); border-color: #10b981;" type="button">
+            ✓ Confirm Resolution & Close Chat
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Dispatched Alerts Drawer Modal -->
   <div class="modal-overlay" id="notif-modal">

@@ -11,6 +11,7 @@ import {
   getAlternativeFlights,
   rebookFlightAtomic,
   registerAlertSubscription,
+  getConversationById,
 } from "./db/client";
 import { sanitizeAirportCode, sanitizeFlightNumber, sanitizeBookingRef } from "./tools/parser";
 
@@ -216,10 +217,26 @@ export class SupportAgent extends AIChatAgent<Env> {
       const recentMessages = this.messages.slice(-10);
       const modelMessages = await convertToModelMessages(recentMessages);
 
+      // Contextualize system prompt with active case and customer metadata if available
+      let dynamicInstructions = SYSTEM_INSTRUCTIONS;
+      if (this.name) {
+        try {
+          const conv = await getConversationById(this.env.DB, this.name);
+          if (conv) {
+            dynamicInstructions += `\n### ACTIVE CASE CONTEXT:\n- Conversation ID: ${conv.conversation_id}\n- Customer Name: ${conv.customer_name} (ID: ${conv.customer_id})\n- Contact: ${conv.customer_phone} | ${conv.customer_email}\n- Booking Reference: ${conv.booking_ref || "N/A"}\n- Flight Number: ${conv.flight_number || "N/A"}\n- Case Title: ${conv.title}\n- Category: ${conv.issue_category}\n- Status: ${conv.status}\n`;
+            if (conv.status === "RESOLVED") {
+              dynamicInstructions += `\nNOTE: This case was RESOLVED on ${conv.resolved_at}. Resolution Summary: "${conv.resolution_summary}". If customer asks further questions, advise them this chat is resolved and closed, and offer to open a new case.\n`;
+            }
+          }
+        } catch (ctxErr) {
+          console.warn("[SupportAgent Context Lookup Warning]:", ctxErr);
+        }
+      }
+
       // Stream reasoning & multi-step tool calls using Llama 3.3
       const result = streamText({
         model: workersai("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
-        system: SYSTEM_INSTRUCTIONS,
+        system: dynamicInstructions,
         messages: modelMessages,
         tools,
         stopWhen: isStepCount(5),

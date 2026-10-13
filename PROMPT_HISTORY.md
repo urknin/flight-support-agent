@@ -138,6 +138,30 @@ To prevent brittle implementation, the plan underwent two rounds of adversarial 
 
 ---
 
+### Prompt 4.3: Unique Conversation Sessions, AI Case Intake, Search, and 1-Active Constraint
+**Prompt**:
+> *"the agent must have an option to open new cases with the help of ai. there must also be an option for agent to resolve and end a chat signifying the customer concern was successfully addressed. an option to search past conversations by customername/customerid. this means we will need a unique conversationId per chat. a customer can only have 1 active conversation at a time."*
+
+**Changes & Architectural Enhancements**:
+1. **D1 Relational Schema & State Integrity (`schema.sql`, `src/types.ts`, `src/db/client.ts`)**:
+   - Created `conversations` table storing `conversation_id`, `customer_id`, `booking_ref`, `title`, `issue_category`, `status` (`ACTIVE` / `RESOLVED`), `resolution_summary`, `created_at`, `resolved_at`.
+   - **Database-Level Constraint**: Added partial unique index `CREATE UNIQUE INDEX idx_unique_active_customer_conv ON conversations(customer_id) WHERE status = 'ACTIVE'`, guaranteeing at the SQLite engine level that no customer can ever have more than 1 concurrent active case.
+   - Built query and search functions: `searchConversations` (searching customer name, customer ID, conversation ID, status), `createConversation`, `resolveConversation`, and `getActiveConversationByCustomer`.
+2. **AI Case Intake & Resolution Summarizer APIs (`src/index.ts`)**:
+   - `POST /api/cases/ai-intake`: Leverages Workers AI (`Llama 3.3 70B`) to diagnose customer flight disruption, draft a concise case title, issue category, priority, diagnosis, and warm opening greeting.
+   - `POST /api/cases/ai-summarize-resolution`: Generates a professional resolution summary highlighting addressed customer concerns when closing a case.
+   - `POST /api/conversations`: Creates unique conversation sessions (`conv_${customerId}_${timestamp}`) and strictly enforces the 1-active constraint (HTTP 409 Conflict if active case exists).
+   - `POST /api/conversations/:id/resolve`: Atomically marks conversation `RESOLVED` with timestamps and resolution notes.
+3. **Multi-Case Interactive UI (`src/public/index.html`, `style.css`, `app.js`)**:
+   - Case Operations header displaying unique `conversationId`, Customer ID, status badge (`🟢 ACTIVE` / `✓ RESOLVED`), and action buttons (`✓ Resolve & End Chat`, `🔍 Cases`, `✨ New Case`).
+   - Modal 1: Real-time search of past and active conversations by Customer Name or Customer ID with status filters and 1-click chat switching.
+   - Modal 2: Open New Case with AI assistance, featuring customer selector with live active-case conflict detection (with options to switch to or resolve the existing case) and Llama 3.3 case briefing.
+   - Modal 3: Resolve & End Chat with automated AI resolution summary generation, locking chat to read-only state with a green resolution banner.
+4. **Automated Testing (`test/conversations.test.ts`)**:
+   - Added unit test suite verifying search by customer name/ID, filtering, strict prevention of multiple active cases per customer, and the complete resolution lifecycle.
+
+---
+
 ## 5. Reflections on AI-Assisted Engineering
 
 1. **Iterative Verification Over Blind Acceptance**:

@@ -1,8 +1,18 @@
 import { routeAgentRequest } from "agents";
-import { Env, FlightStatus } from "./types";
+import { Env, FlightStatus, ConversationStatus, IssueCategory } from "./types";
 import { SupportAgent } from "./agent";
 import { FlightWatcherWorkflow } from "./workflow";
-import { getBookingDetails, getNotificationLogs, updateFlightStatus } from "./db/client";
+import {
+  getBookingDetails,
+  getNotificationLogs,
+  updateFlightStatus,
+  getConversationById,
+  getActiveConversationByCustomer,
+  searchConversations,
+  createConversation,
+  resolveConversation,
+  getAllPassengers,
+} from "./db/client";
 import { getAirportWeather } from "./tools/weather";
 import { getFAAAirportStatus } from "./tools/faa";
 import { dispatchAlert } from "./notifications/dispatcher";
@@ -38,6 +48,259 @@ export default {
 
       if (request.method === "OPTIONS") {
         return new Response(null, { headers: corsHeaders });
+      }
+
+      // GET /api/passengers
+      if (url.pathname === "/api/passengers") {
+        const passengers = await getAllPassengers(env.DB);
+        return new Response(JSON.stringify(passengers), { headers: corsHeaders });
+      }
+
+      // GET /api/conversations (search by customer name, customer ID, conversation ID, status)
+      if (url.pathname === "/api/conversations" && request.method === "GET") {
+        const query = url.searchParams.get("query") || undefined;
+        const status = (url.searchParams.get("status") as ConversationStatus | "ALL") || undefined;
+        const customerId = url.searchParams.get("customerId") || undefined;
+        const conversations = await searchConversations(env.DB, { query, status, customerId });
+        return new Response(JSON.stringify({ conversations }), { headers: corsHeaders });
+      }
+
+      // POST /api/conversations (create new case, enforce 1 active conversation per customer)
+      if (url.pathname === "/api/conversations" && request.method === "POST") {
+        const body: any = await request.json().catch(() => ({}));
+        const customerId = (body.customerId || "").trim();
+        const bookingRef = body.bookingRef ? body.bookingRef.trim().toUpperCase() : null;
+        const title = (body.title || "Flight Disruption Support Case").trim();
+        const issueCategory: IssueCategory = body.issueCategory || "WEATHER_DELAY";
+
+        if (!customerId) {
+          return new Response(JSON.stringify({ error: "customerId is required" }), {
+            status: 400,
+            headers: corsHeaders,
+          });
+        }
+
+        const convId = `conv_${customerId.toLowerCase().replace(/[^a-z0-9]/g, "")}_${Date.now()}`;
+        const result = await createConversation(env.DB, {
+          conversationId: convId,
+          customerId,
+          bookingRef,
+          title,
+          issueCategory,
+        });
+
+        if (!result.success) {
+          return new Response(
+            JSON.stringify({
+              error: result.error,
+              activeConversation: result.conversation,
+            }),
+            {
+              status: 409,
+              headers: corsHeaders,
+            }
+          );
+        }
+
+        return new Response(JSON.stringify({ success: true, conversation: result.conversation }), {
+          status: 201,
+          headers: corsHeaders,
+        });
+      }
+
+      // POST /api/conversations/:id/resolve (resolve and end chat)
+      if (url.pathname.match(/^\/api\/conversations\/[^/]+\/resolve$/) && request.method === "POST") {
+        const id = url.pathname.split("/")[3];
+        const body: any = await request.json().catch(() => ({}));
+        const summary = body.resolutionSummary;
+
+        const result = await resolveConversation(env.DB, id, summary);
+        if (!result.success) {
+          return new Response(JSON.stringify({ error: result.error }), {
+            status: 400,
+            headers: corsHeaders,
+          });
+        }
+
+        // Notify DO session if connected
+        try {
+          const agentNs = env.SupportAgent as any;
+          const agentId = agentNs.idFromName(id);
+          const agentStub = agentNs.get(agentId);
+          await agentStub.notifyPassenger({
+            title: "Case Resolved & Closed",
+            body: `This support conversation has been resolved. Resolution: ${result.updated?.resolution_summary}`,
+            newStatus: "RESOLVED",
+          });
+        } catch (e) {
+          // Expected if not currently active
+        }
+
+        return new Response(JSON.stringify({ success: true, conversation: result.updated }), {
+          headers: corsHeaders,
+        });
+      }
+
+      // GET /api/conversations/:id (fetch single conversation details)
+      if (
+        url.pathname.startsWith("/api/conversations/") &&
+        !url.pathname.includes("/resolve") &&
+        request.method === "GET"
+      ) {
+        const id = url.pathname.replace("/api/conversations/", "").trim();
+        const conversation = await getConversationById(env.DB, id);
+        if (!conversation) {
+          return new Response(JSON.stringify({ error: "Conversation not found" }), {
+            status: 404,
+            headers: corsHeaders,
+          });
+        }
+        return new Response(JSON.stringify(conversation), { headers: corsHeaders });
+      }
+
+      // POST /api/cases/ai-intake (Generate AI pre-briefing, category, and opening greeting)
+      if (url.pathname === "/api/cases/ai-intake" && request.method === "POST") {
+        const body: any = await request.json().catch(() => ({}));
+        const customerId = (body.customerId || "P-101").trim();
+        const bookingRef = body.bookingRef ? body.bookingRef.trim().toUpperCase() : undefined;
+        const issueDesc = body.issueDescription || "Severe weather delay rebooking";
+
+        // Check 1-active-conversation rule upfront
+        const active = await getActiveConversationByCustomer(env.DB, customerId);
+        if (active) {
+          return new Response(
+            JSON.stringify({
+              error: `Customer ${active.customer_name} (${customerId}) already has an active conversation: "${active.title}" (${active.conversation_id}). A customer can only have 1 active conversation at a time.`,
+              activeConversation: active,
+            }),
+            { status: 409, headers: corsHeaders }
+          );
+        }
+
+        // Fetch customer profile and booking
+        const passenger = (await env.DB.prepare("SELECT * FROM passengers WHERE passenger_id = ?").bind(customerId).first()) as any;
+        const booking = bookingRef ? await getBookingDetails(env.DB, bookingRef) : null;
+
+        try {
+          const prompt = `You are a Senior Airline Customer Support Intake Coordinator.
+Create a structured case brief for a passenger experiencing travel disruption:
+- Customer: ${passenger?.name || "Passenger"} (ID: ${customerId})
+- Booking Ref: ${booking?.booking_ref || bookingRef || "SKY-8842"}
+- Scheduled Flight: ${booking?.flight_number || "AA1822"} (${booking?.origin_code || "DFW"} to ${booking?.dest_code || "ORD"})
+- Flight Status: ${booking?.flight_status || "DELAYED"} (Reason: ${booking?.delay_reason || "Severe Thunderstorms / FAA Ground Stop"})
+- Passenger Request: ${issueDesc}
+
+Respond strictly in valid JSON with no markdown backticks:
+{
+  "title": "<Concise 5 to 7 word case title>",
+  "issueCategory": "WEATHER_DELAY",
+  "priority": "HIGH",
+  "aiDiagnosis": "<2-sentence diagnostic summarizing passenger disruption and actionable recommendation>",
+  "openingMessage": "<Warm, factual, 2-sentence opening greeting stating how the agent will assist>",
+  "suggestedActions": [
+    "Rebook on AA2040 (18:45 UTC)",
+    "Check DFW Storm Radar",
+    "Set Up SMS Disruption Alerts"
+  ]
+}`;
+
+          const aiRes: any = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
+            prompt,
+            max_tokens: 350,
+          });
+
+          let parsed = null;
+          if (aiRes && aiRes.response) {
+            try {
+              const clean = aiRes.response.replace(/```(?:json)?/g, "").replace(/```/g, "").trim();
+              parsed = JSON.parse(clean);
+            } catch {
+              // Regex fallback
+            }
+          }
+
+          if (!parsed) {
+            parsed = {
+              title: `${booking?.flight_number || "AA1822"} Weather Disruption Support`,
+              issueCategory: "WEATHER_DELAY",
+              priority: "HIGH",
+              aiDiagnosis: `Passenger ${passenger?.name || "Alex Mercer"} is impacted by the 180-min thunderstorm delay on ${booking?.flight_number || "AA1822"}. Immediate rebooking onto AA2040 (8 open seats) is recommended.`,
+              openingMessage: `Hello ${passenger?.name ? passenger.name.split(" ")[0] : "Alex"}, I have opened your support case regarding flight ${booking?.flight_number || "AA1822"}. How can I assist you with rebooking or checking alternative flights?`,
+              suggestedActions: [
+                "Rebook to AA2040 (18:45 UTC)",
+                "Check DFW Storm Radar",
+                "Set Up SMS Delay Alerts",
+              ],
+            };
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              customerId,
+              customerName: passenger?.name || "Alex Mercer",
+              bookingRef: booking?.booking_ref || bookingRef || "SKY-8842",
+              flightNumber: booking?.flight_number || "AA1822",
+              ...parsed,
+            }),
+            { headers: corsHeaders }
+          );
+        } catch (aiErr: any) {
+          console.warn("[AI Intake Fallback]:", aiErr?.message);
+          return new Response(
+            JSON.stringify({
+              success: true,
+              customerId,
+              customerName: passenger?.name || "Alex Mercer",
+              bookingRef: booking?.booking_ref || bookingRef || "SKY-8842",
+              flightNumber: booking?.flight_number || "AA1822",
+              title: `${booking?.flight_number || "AA1822"} Disruption Case`,
+              issueCategory: "WEATHER_DELAY",
+              priority: "HIGH",
+              aiDiagnosis: `Passenger is delayed due to convective storms at DFW. Open seats confirmed on AA2040.`,
+              openingMessage: `Hello ${passenger?.name ? passenger.name.split(" ")[0] : "Alex"}, I have opened your support case regarding flight ${booking?.flight_number || "AA1822"}. How can I assist you today?`,
+              suggestedActions: [
+                "Rebook to AA2040 (18:45 UTC)",
+                "Check DFW Storm Radar",
+                "Set Up SMS Delay Alerts",
+              ],
+            }),
+            { headers: corsHeaders }
+          );
+        }
+      }
+
+      // POST /api/cases/ai-summarize-resolution (Generate AI resolution summary)
+      if (url.pathname === "/api/cases/ai-summarize-resolution" && request.method === "POST") {
+        const body: any = await request.json().catch(() => ({}));
+        const convId = body.conversationId;
+        const conv = convId ? await getConversationById(env.DB, convId) : null;
+
+        try {
+          const prompt = `You are a Senior Airline Customer Support Operations Manager.
+Write a concise, professional 1-to-2 sentence resolution summary for closing this customer case:
+- Customer: ${conv?.customer_name || "Alex Mercer"} (Booking: ${conv?.booking_ref || "SKY-8842"})
+- Case: ${conv?.title || "Flight Weather Delay Assistance"}
+- Flight: ${conv?.flight_number || "AA1822"} (Status: ${conv?.flight_status || "DELAYED"})
+- Additional notes: ${body.notes || "Addressed passenger concerns and provided travel solutions."}
+
+Return strictly the 1-2 sentence resolution summary with no quotes or preamble.`;
+
+          const aiRes: any = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
+            prompt,
+            max_tokens: 150,
+          });
+
+          const summary =
+            aiRes && aiRes.response
+              ? aiRes.response.trim().replace(/^["']|["']$/g, "")
+              : `Customer concern regarding flight ${conv?.flight_number || "AA1822"} was fully addressed. Alternative flight availability confirmed and proactive notification preferences updated.`;
+
+          return new Response(JSON.stringify({ success: true, summary }), { headers: corsHeaders });
+        } catch {
+          const fallbackSummary = `Customer inquiry regarding flight ${conv?.flight_number || "AA1822"} was fully addressed. Alternative options reviewed and disruption alerts configured.`;
+          return new Response(JSON.stringify({ success: true, summary: fallbackSummary }), { headers: corsHeaders });
+        }
       }
 
       // GET /api/booking/:ref
@@ -112,7 +375,7 @@ export default {
         // Push into the Durable Object session if active
         try {
           const agentNs = env.SupportAgent as any;
-          const agentId = agentNs.idFromName("SKY-8842");
+          const agentId = agentNs.idFromName("conv_p101_active");
           const agentStub = agentNs.get(agentId);
           await agentStub.notifyPassenger({
             title: `Flight Alert: ${flightNumber} ${status}`,
@@ -120,7 +383,7 @@ export default {
             newStatus: status,
           });
         } catch (e) {
-          console.warn("[SimulateDisruption] Agent push error (expected if not yet connected):", e);
+          console.warn("[SimulateDisruption] Agent push error:", e);
         }
 
         return new Response(
