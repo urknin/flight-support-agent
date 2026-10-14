@@ -228,6 +228,20 @@ To prevent brittle implementation, the plan underwent two rounds of adversarial 
 
 ---
 
+### Prompt 4.8: Upstream SDK Patch Preparation (`cloudflare/ai`)
+**Prompt**:
+> *"/home/sid/.gemini/antigravity-ide/scratch/flight-support-agent/scripts/patch-workers-ai.js we should apply this patch directly to the sdk."*
+
+**Changes & Architectural Enhancements**:
+1. **Upstream Git Patch File (`patches/0001-fix-workers-ai-provider-streaming-token-duplication.patch`)**:
+   - Formatted the fix directly against the upstream monorepo structure (`packages/workers-ai-provider/src/streaming.ts`).
+   - Guards native `chunk.response` and `chunk.tool_calls` branches with `hasChoicesDelta` to defer to `choices[0].delta`, preventing token duplication ("word word") and repeated tool argument frames.
+2. **Upstream PR Submission Guide (`UPSTREAM_PR_SUBMISSION.md`)**:
+   - Created a comprehensive pull request package targeting `cloudflare/ai` on GitHub.
+   - Includes root cause analysis, reproduction test case, proposed unified diff, and step-by-step submission commands via GitHub CLI (`gh pr create`).
+
+---
+
 ## 5. Reflections on AI-Assisted Engineering
 
 1. **Iterative Verification Over Blind Acceptance**:
