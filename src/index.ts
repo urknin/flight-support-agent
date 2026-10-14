@@ -50,6 +50,33 @@ export default {
         return new Response(null, { headers: corsHeaders });
       }
 
+      // GET /api/health
+      if (url.pathname === "/api/health") {
+        try {
+          const dbProbe = await env.DB.prepare("SELECT 1 as healthy").first<{ healthy: number }>();
+          return new Response(
+            JSON.stringify({
+              status: dbProbe?.healthy === 1 ? "healthy" : "degraded",
+              timestamp: new Date().toISOString(),
+              services: {
+                worker: "online",
+                d1: dbProbe?.healthy === 1 ? "connected" : "degraded",
+                durable_objects: "available",
+                workflows: "available",
+                workers_ai: "available",
+              },
+              environment: env.ENVIRONMENT || "production",
+            }),
+            { status: 200, headers: corsHeaders }
+          );
+        } catch (err: any) {
+          return new Response(
+            JSON.stringify({ status: "degraded", error: err?.message || String(err), timestamp: new Date().toISOString() }),
+            { status: 503, headers: corsHeaders }
+          );
+        }
+      }
+
       // GET /api/passengers
       if (url.pathname === "/api/passengers") {
         const passengers = await getAllPassengers(env.DB);

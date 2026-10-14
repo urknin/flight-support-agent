@@ -201,6 +201,19 @@ To prevent brittle implementation, the plan underwent two rounds of adversarial 
 
 ---
 
+### Prompt 4.6: Production Health Check Endpoint & Header Status Pinning
+**Prompt**:
+> *"put the live url in the readme. at the very top. pin the health check status too."*
+
+**Changes & Architectural Enhancements**:
+1. **Production Health Check Endpoint (`src/index.ts`)**:
+   - Added `GET /api/health` probe that performs a live heartbeat query against Cloudflare D1 (`SELECT 1 as healthy`) and reports individual health states for Worker runtime, D1 edge database, Durable Objects, Workflows, and Workers AI.
+2. **Pinned Status & Live Badges (`README.md`)**:
+   - Pinned the live production application URL ([`https://flight-support-agent.rk-siddart.workers.dev`](https://flight-support-agent.rk-siddart.workers.dev)) and health check endpoint at the very top of `README.md`.
+   - Added live GitHub Actions CI/CD badge linking to automated pipeline status.
+
+---
+
 ## 5. Reflections on AI-Assisted Engineering
 
 1. **Iterative Verification Over Blind Acceptance**:

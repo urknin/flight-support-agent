@@ -1,6 +1,11 @@
 # 🛫 Cloudflare Autonomous Flight Support & Disruption Agent
 
-> An autonomous, AI-powered customer support and rebooking agent built on the **Cloudflare Developer Platform** for the **Senior Software Engineer (Cloudflare for SaaS)** assignment.
+> 🌐 **Live Production App:** [https://flight-support-agent.rk-siddart.workers.dev](https://flight-support-agent.rk-siddart.workers.dev)  
+> 🩺 **Live Health Check:** [`https://flight-support-agent.rk-siddart.workers.dev/api/health`](https://flight-support-agent.rk-siddart.workers.dev/api/health) — `{"status":"healthy","services":{"worker":"online","d1":"connected"}}`  
+> 📦 **GitHub Repository:** [https://github.com/urknin/flight-support-agent](https://github.com/urknin/flight-support-agent)  
+> 🚦 **CI/CD Pipeline:** [![CI/CD Pipeline](https://github.com/urknin/flight-support-agent/actions/workflows/deploy.yml/badge.svg)](https://github.com/urknin/flight-support-agent/actions/workflows/deploy.yml)
+
+An autonomous, AI-powered customer support and rebooking agent built on the **Cloudflare Developer Platform** for the **Senior Software Engineer (Cloudflare for SaaS)** assignment.
 
 Powered by **Cloudflare Agents SDK**, **Workers AI (Llama 3.3 70B)**, **Cloudflare Workflows**, **Durable Objects**, and **D1 Database**.
 
