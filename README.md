@@ -119,62 +119,43 @@ Visit **`http://localhost:8787`** in your browser.
 
 ---
 
-## 🚀 CI/CD & Production Deployment (GitHub Actions)
+## 🚀 Automated CI/CD Pipeline (GitHub Actions)
 
-This project includes a production-grade GitHub Actions CI/CD pipeline in [`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml).
+This project features a fully automated edge deployment pipeline in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
 
-### 1. One-Time Cloudflare Account Setup
-```bash
-# 1. Create the remote production D1 database
-npx wrangler d1 create flight-support-db
-
-# 2. Update wrangler.jsonc with the generated database UUID:
-# "d1_databases": [{ "binding": "DB", "database_name": "flight-support-db", "database_id": "<REAL-UUID>" }]
-
-# 3. Seed scenario data to the remote database ONCE (not run in CI)
-npm run db:seed:remote
-
-# 4. (Optional) Set runtime secrets in Cloudflare Worker KMS
-npx wrangler secret put TWILIO_ACCOUNT_SID
-npx wrangler secret put TWILIO_AUTH_TOKEN
-npx wrangler secret put TWILIO_FROM_NUMBER
-npx wrangler secret put RESEND_API_KEY
-```
-
-### 2. Configure GitHub Secrets
-In your GitHub Repository under **Settings → Secrets and variables → Actions**, add:
-- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with `Workers Scripts:Edit`, `D1:Edit`, `Durable Objects:Edit`, `Workflows:Edit`.
-- `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare Account ID.
-
-### 3. Automated Pipeline Behavior
-- **Quality Gate (PRs & Pushes)**: Runs offline without secrets. Executes `npm ci`, `postinstall` patch, `tsc --noEmit`, 26 unit tests (`npm test`), and `wrangler deploy --dry-run`.
-- **Production Release (Push to `main`)**: Runs clean DDL schema sync (`schema.sql` with zero `INSERT`s), deploys Worker, Durable Objects, Workflows, and static assets via `npx wrangler deploy`, and verifies via `npx wrangler deployments list`.
+- **Offline Quality Gate (`test-and-verify`)**: Triggered on every pull request and push. Executes completely offline without credentials: runs `npm ci`, strict TypeScript typechecking (`tsc --noEmit`), 26 automated unit tests across 5 suites (`npm test`), and offline bundle verification (`wrangler deploy --dry-run`).
+- **Production Edge Release (`deploy`)**: Triggered on pushes to `main`. Executes idempotent DDL schema migrations against Cloudflare D1 (`schema.sql`), deploys the Worker, Durable Objects, Workflows, and static assets via `wrangler deploy`, and verifies deployment status via `wrangler deployments list`.
 
 ---
 
 ## 🎮 Interactive Live Demo Walkthrough
 
+> 💡 **Instant Evaluation:** You can experience the complete system directly on the live production deployment at **[https://flight-support-agent.rk-siddart.workers.dev](https://flight-support-agent.rk-siddart.workers.dev)** (or locally at `http://localhost:8787`).
+
 ### Scenario: Severe Thunderstorms at DFW Delaying Flight AA1822
 
 1. **Open the Dashboard**:
-   - Navigate to `http://localhost:8787`.
-   - The left pane shows the **Live Flight Ops Board** (`AA1822` to Chicago ORD, `UA2040` to Austin AUS, etc.).
-   - The **Airport Weather Radar** displays live conditions fetched from Open-Meteo.
+   - Navigate to **[https://flight-support-agent.rk-siddart.workers.dev](https://flight-support-agent.rk-siddart.workers.dev)**.
+   - The left pane displays the **Live Flight Operations Board** (`AA1822` to Chicago ORD, `AA2040`, `UA450`, etc.) powered by Cloudflare D1.
+   - The **Airport Weather Radar** displays live aviation weather conditions dynamically fetched from Open-Meteo.
 
 2. **Trigger a Disruption**:
-   - Click the orange **"Simulate Weather Disruption"** button in the header (or run `curl -X POST http://localhost:8787/api/simulate-disruption`).
+   - Click the orange **"Simulate Weather Disruption"** button in the header (or run `curl -X POST https://flight-support-agent.rk-siddart.workers.dev/api/simulate-disruption`).
    - `AA1822` status immediately updates to `DELAYED (+180 min)` with root cause: *"Severe Convective Thunderstorms at DFW"*.
 
 3. **Observe Autonomous Multi-Channel Dispatch**:
-   - Check the **Notification Drawer** at the bottom right.
-   - Notice the automated SMS and Email alerts dispatched for passenger **Alice Johnson** (`SKY-8842`), providing immediate rebooking options.
+   - Open the **Notification Drawer** at the bottom right.
+   - Observe the automated SMS and Email alerts dispatched for passenger **Alex Mercer** (`SKY-8842`), providing immediate rebooking options.
 
-4. **Engage with the AI Rebooking Agent**:
-   - In the right-hand **AI Passenger Assistant** panel, enter Booking Reference: `SKY-8842`.
-   - Click **Connect Agent**.
-   - The agent retrieves Alice's booking details, confirms the 180-minute delay due to severe weather, and offers available alternative flights (e.g. `AA2040` or next-day morning departures).
-   - Type: *"Can you rebook me on the next available flight to Austin or Chicago?"*
-   - The agent calls `rebook_flight`, atomically secures a seat, updates D1, and confirms the new itinerary with zero human agent intervention!
+4. **Engage with the AI Rebooking Assistant**:
+   - In the right-hand **AI Passenger Assistant** panel, passenger Alex Mercer's active case session (`conv_p101_active`) is loaded.
+   - The assistant reviews the storm delay, presents flight alternatives (`AA2040` at 18:45 UTC, `AA912`, or next-morning options), and renders interactive suggestion cards.
+   - Click the **"Rebook on flight AA2040 at 18:45 UTC"** suggestion card or type: *"Can you rebook me on flight AA2040?"*
+   - The agent calls `rebook_flight`, atomically decrements available seats in D1, updates the booking to `REBOOKED`, and confirms the itinerary without human intervention.
+
+5. **Multi-Case Intake & Resolution Lifecycle**:
+   - Click **`✓ Resolve & End Chat`** in the case header. Workers AI generates an automated resolution summary and transitions the conversation to a read-only `RESOLVED` state.
+   - Click **`✨ New Case`** to open an AI-assisted case intake with live customer conflict prevention (1 active case per customer rule), or click **`🔍 Cases`** to search past conversations by Customer Name (`Alex Mercer`) or Customer ID (`P-101`).
 
 ---
 
@@ -209,8 +190,7 @@ flight-support-agent/
 │       ├── index.html         # Semantic dark-mode layout
 │       ├── style.css          # Glassmorphic airport operations styling
 │       └── app.js             # WebSocket client & dashboard controller
-└── test/
-    └── tools.test.ts          # Automated unit test suite (node:test)
+└── test/                      # 26 automated unit tests across 5 test suites (node:test)
 ```
 
 ---
