@@ -31,7 +31,7 @@
     {
       "binding": "DB",
       "database_name": "flight-support-db",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "f05eb02a-7c86-4b78-9bb1-998cd993063e"
     }
   ],
   "workflows": [
