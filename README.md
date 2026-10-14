@@ -5,15 +5,15 @@
 > 📦 **GitHub Repository:** [https://github.com/urknin/flight-support-agent](https://github.com/urknin/flight-support-agent)  
 > 🚦 **CI/CD Pipeline:** [![CI/CD Pipeline](https://github.com/urknin/flight-support-agent/actions/workflows/deploy.yml/badge.svg)](https://github.com/urknin/flight-support-agent/actions/workflows/deploy.yml)
 
-An autonomous, AI-powered customer support and rebooking agent built on the **Cloudflare Developer Platform** for the **Senior Software Engineer (Cloudflare for SaaS)** assignment.
+An autonomous, edge-native customer support and rebooking engine designed to demonstrate highly available, stateful AI workflows on the **Cloudflare Developer Platform**. Built for the **Senior Software Engineer (Cloudflare for SaaS)** evaluation.
 
-Powered by **Cloudflare Agents SDK**, **Workers AI (Llama 3.3 70B)**, **Cloudflare Workflows**, **Durable Objects**, and **D1 Database**.
+Powered by the **Cloudflare Agents SDK**, **Workers AI (Llama 3.3 70B)**, **Cloudflare Workflows**, **Durable Objects**, and **D1 Database**.
 
 ---
 
-## 🌟 Architecture Overview
+## 🌟 Architecture & Data Flow
 
-```
+```text
                                       +---------------------------------------------+
                                       |          Cloudflare Developer Platform      |
                                       |                                             |
@@ -41,38 +41,36 @@ Powered by **Cloudflare Agents SDK**, **Workers AI (Llama 3.3 70B)**, **Cloudfla
                                       +------------------------+
 ```
 
-### Cloudflare Stack Alignment
+### Architectural Decisions & Cloudflare Primitives
 
-| Cloudflare Primitive | Implementation in Project | Key Value Delivered |
+| Cloudflare Primitive | Implementation | The "Why" (Engineering Rationale) |
 | :--- | :--- | :--- |
-| **Workers AI** | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Zero-latency inference on Cloudflare's edge; tool calling for airport weather, seat lookups, and rebooking. |
-| **Agents SDK** | `AIChatAgent` on Durable Objects | Persistent per-passenger WebSocket sessions, conversational memory, and bi-directional push. |
-| **Cloudflare Workflows** | `FlightWatcherWorkflow` | Bounded, state-diff-driven background watcher with durable sleep steps and automatic retry. |
-| **Cloudflare D1** | `flight-support-db` (SQLite) | Relational storage for flights, seat inventories, passenger profiles, and delivery audit logs. |
-| **Cloudflare Assets** | Static Dashboard in `src/public/` | Zero-configuration single-page app serving airport ops board, weather radar, and chat UI. |
+| **Durable Objects** | `SupportAgent` | **Strict Serializability & State:** Rebooking flights requires transactional guarantees. DOs provide a single-point-of-truth for WebSocket connections and prevent double-booking race conditions across global edge nodes. |
+| **Workers AI** | `@cf/meta/llama-3.3-70b` | **Zero-Latency Edge Inference:** Keeps LLM tool-calling (weather, seat lookups) local to the compute layer, eliminating costly round-trips to centralized providers like OpenAI. |
+| **Cloudflare Workflows** | `FlightWatcherWorkflow` | **Durable Execution:** Replaces fragile cron jobs with state-diff-driven, bounded background workers featuring durable sleep and automatic retry semantics for long-running FAA/Weather polling. |
+| **Cloudflare D1** | `flight-support-db` | **Relational Edge Storage:** SQLite at the edge, utilizing custom `withDbRetry()` exponential backoff to handle single-writer lock contention (`SQLITE_BUSY`) during atomic seat decrements. |
+| **Cloudflare Assets** | Static Dashboard | **Zero-Config SPA:** Zero-configuration single-page app serving airport ops board, weather radar, and WebSocket chat UI. |
 
 ---
 
-## 🚀 Key Features
+## 🚀 Core Engineering Challenges Solved
 
-1. **Autonomous Disruption Detection**:
+1. **Edge-Native State & Concurrency (The Double-Booking Problem)**:
+   - Built on **Durable Objects** to guarantee that concurrent rebooking requests for the same flight process serially. 
+   - Utilizes atomic seat decrements (`UPDATE flights SET available_seats = available_seats - 1 WHERE available_seats > 0`) in D1 and a robust `withDbRetry()` backoff with full jitter to elegantly handle SQLite write locks during high-contention disruption events.
+
+2. **Autonomous Disruption Detection**:
    - `FlightWatcherWorkflow` continuously monitors flights and hub weather (DFW, ORD).
-   - Translates WMO meteorological codes (e.g. Code 95 = Severe Convective Thunderstorm) into human-intelligible root cause summaries.
-   - Computes state diffs and only triggers alerts when flight status or delay times change.
+   - Translates raw WMO meteorological codes (e.g. Code 95 = Severe Convective Thunderstorm) into human-intelligible root cause summaries via AI tool calling.
+   - Computes state diffs to ensure alerts are only dispatched when status or delay times definitively change, preventing alert fatigue.
 
-2. **Stateful Rebooking Chat Agent**:
-   - `SupportAgent` runs on Durable Objects with WebSocket streaming.
-   - Enforces a rolling 10-turn context window to conserve LLM tokens and eliminate hallucinations.
-   - Programmatic sanitization (`safeParseToolArgs`) strips stray markdown code blocks from small-model tool calls.
+3. **Stateful LLM Rebooking Agent**:
+   - `SupportAgent` enforces a rolling 10-turn context window to conserve LLM tokens, maintain strict state, and eliminate hallucinations over long passenger sessions.
+   - Programmatic sanitization (`safeParseToolArgs`) strips stray markdown code blocks from small-model tool calls, ensuring deterministic JSON execution.
 
-3. **Dual-Mode Proactive Dispatch (SMS & Email)**:
-   - **Live Mode**: If `TWILIO_ACCOUNT_SID` and `RESEND_API_KEY` are provided, real SMS and responsive HTML emails are dispatched.
-   - **Zero-Config Evaluation Mode**: When running without third-party API keys (or on trial accounts with unverified numbers), alerts are transparently routed to the **In-App Notification Drawer** in the dashboard. Evaluators never get blocked.
-
-4. **Concurrency & Fault Tolerance**:
-   - `withDbRetry()`: Exponential backoff with full jitter to handle SQLite single-writer lock contention (`SQLITE_BUSY`).
-   - Atomic seat decrement (`UPDATE flights SET available_seats = available_seats - 1 WHERE available_seats > 0`) to prevent overbooking races.
-   - 4-second `AbortController` timeouts on external weather and FAA queries with local fallback caches.
+4. **Dual-Mode Proactive Dispatch (SMS & Email)**:
+   - **Live Mode**: Integrates with Twilio and Resend for real SMS and responsive HTML email dispatch.
+   - **Zero-Config Evaluation Mode**: Gracefully falls back to an **In-App Notification Drawer** when third-party API keys are missing, ensuring evaluating engineers never hit a blocker.
 
 ---
 
@@ -85,7 +83,7 @@ Powered by **Cloudflare Agents SDK**, **Workers AI (Llama 3.3 70B)**, **Cloudfla
 ### 1. Installation
 
 ```bash
-git clone <repo-url> flight-support-agent
+git clone https://github.com/urknin/flight-support-agent.git
 cd flight-support-agent
 npm install
 ```
@@ -161,7 +159,7 @@ This project features a fully automated edge deployment pipeline in [`.github/wo
 
 ## 📂 Project Structure
 
-```
+```text
 flight-support-agent/
 ├── package.json               # Dependencies & scripts (agents, ai v7, workers-ai-provider, wrangler)
 ├── tsconfig.json              # TypeScript strict configuration

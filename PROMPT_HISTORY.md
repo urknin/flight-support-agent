@@ -214,6 +214,20 @@ To prevent brittle implementation, the plan underwent two rounds of adversarial 
 
 ---
 
+### Prompt 4.7: Architecture-First README Overhaul & CI/CD Markdown Path Filtering
+**Prompt**:
+> *"/home/sid/Downloads/cloudflare_flight_support_agent_readme.md add this reaadme. cicd does not need to run for md file changes."*
+
+**Changes & Architectural Enhancements**:
+1. **Architecture-First README Overhaul (`README.md`)**:
+   - Replaced `README.md` with `/home/sid/Downloads/cloudflare_flight_support_agent_readme.md`.
+   - Elevated architectural decisions (Strict Serializability via Durable Objects, zero-latency inference via Workers AI, resilient background execution via Workflows, SQLite write-lock contention handling via `withDbRetry()`, and dual-mode notification dispatch).
+   - Maintained top-pinned live production URL and health check badges.
+2. **CI/CD Markdown Path Filtering (`.github/workflows/deploy.yml`)**:
+   - Configured `paths-ignore: ['**.md']` for both `push` and `pull_request` triggers so that documentation updates do not trigger unnecessary CI/CD pipeline runs and Worker deployments.
+
+---
+
 ## 5. Reflections on AI-Assisted Engineering
 
 1. **Iterative Verification Over Blind Acceptance**:
