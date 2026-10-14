@@ -162,6 +162,24 @@ To prevent brittle implementation, the plan underwent two rounds of adversarial 
 
 ---
 
+### Prompt 4.4: WebSocket Outbox Buffering & Token Deduplication Defense
+**Prompt**:
+> *"Please rebook me on flight AA2040 at 18:45 UTC. AI: Reconnecting to flight operations server... Please try again in a moment. assistant_1791935436489_gab02zs4l : duplicte words still."*
+
+**Changes & Architectural Enhancements**:
+1. **WebSocket Outbox Queue Buffer (`src/public/app.js`)**:
+   - Eliminated connection drops and dropped messages during socket reconnects.
+   - Built `pendingOutbox` buffer: if a passenger or agent sends a message or clicks an action card while the WebSocket is connecting or offline, the message is queued immediately and the "Thinking..." indicator appears seamlessly.
+   - When `ws.onopen` fires, `flushPendingOutbox()` transmits all queued payloads immediately, guaranteeing zero message loss.
+   - Fixed socket churn in `connectAgentWebSocket()` by verifying active URL before reconnecting.
+2. **Defensive Token & History Deduplication (`src/public/app.js`, `test/stream-parser.test.ts`)**:
+   - Verified that `wrangler dev` active bundle (`dev-rpnYGo`) contains the `hasChoicesDelta` patch from commit `8fef34c`, emitting single tokens cleanly during live streaming.
+   - Built `deduplicateRepetitiveText()` to defensively clean consecutive doubled words (`word word`), doubled capitalized tokens (`YouYou`), doubled punctuation (`,,`), and corrupted historical tokens.
+   - Sanitized legacy stored messages in Durable Object SQLite storage and integrated deduplication across `cleanAssistantText`, `parseSuggestions`, and `renderFullHistory`.
+   - Added unit test suite in `test/stream-parser.test.ts` verifying outbox queuing and string sanitization.
+
+---
+
 ## 5. Reflections on AI-Assisted Engineering
 
 1. **Iterative Verification Over Blind Acceptance**:

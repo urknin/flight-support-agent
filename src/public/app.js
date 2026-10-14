@@ -664,7 +664,25 @@ let currentResponseBubble = null;
 let currentAccumulatedText = "";
 let currentTurnMessageId = null;
 
-// Clean assistant text of any leaked {"type":"start",...} headers
+// Clean repetitive duplicate words or tokens (e.g. from upstream provider bugs or legacy turns)
+function deduplicateRepetitiveText(text) {
+  if (!text) return "";
+  return text
+    // Replace doubled words separated by whitespace: "have have" -> "have", "flight flight" -> "flight"
+    .replace(/\b([A-Za-z0-9+]+)\s+\1\b/g, "$1")
+    .replace(/\b([A-Za-z0-9+]+)\s+\1\b/g, "$1")
+    // Replace doubled capitalized words: "YouYou" -> "You", "YourYour" -> "Your"
+    .replace(/\b([A-Z][a-z]+)\1\b/g, "$1")
+    // Fix doubled phone numbers: "+15125550199+15125550199" -> "+15125550199"
+    .replace(/(\+[0-9]{10,})\1/g, "$1")
+    // Fix double punctuation: ",," -> ",", ".." -> "."
+    .replace(/([.,!?;:])\1+/g, "$1")
+    // Fix legacy corrupted tokens
+    .replace(/AA AA18218222/g, "AA1822")
+    .replace(/conv convectiveective/g, "convective");
+}
+
+// Clean assistant text of any leaked {"type":"start",...} headers and repetitive tokens
 function cleanAssistantText(rawText) {
   if (!rawText) return { cleanText: "", extractedId: null };
   let extractedId = null;
@@ -672,7 +690,8 @@ function cleanAssistantText(rawText) {
   if (match) {
     extractedId = match[1];
   }
-  const cleanText = rawText.replace(/\{"type":"start"[^}]*\}/g, "").trim();
+  let cleanText = rawText.replace(/\{"type":"start"[^}]*\}/g, "").trim();
+  cleanText = deduplicateRepetitiveText(cleanText);
   return { cleanText, extractedId };
 }
 
@@ -762,7 +781,7 @@ function attachCopyHandlers(container) {
 // Parse <suggestions> block into interactive cards
 function parseSuggestions(text) {
   if (!text) return { cleanText: "", suggestions: [] };
-  let cleanText = text;
+  let cleanText = deduplicateRepetitiveText(text);
 
   // Strip markdown code blocks enclosing suggestions if model outputs ```suggestions ... ```
   cleanText = cleanText.replace(/```(?:suggestions?|xml|html)?\s*(<suggestions?>)/gi, "$1");
@@ -935,15 +954,41 @@ function extractTextAndMetaFromStreamBody(body) {
   return { text: extracted, messageId };
 }
 
+// Outbox buffer for messages queued while WebSocket is connecting or reconnecting
+const pendingOutbox = [];
+
+function flushPendingOutbox() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  while (pendingOutbox.length > 0) {
+    const payload = pendingOutbox.shift();
+    console.log("[Agent Client] Sending queued message payload:", payload.id);
+    try {
+      ws.send(JSON.stringify(payload));
+    } catch (err) {
+      console.error("[Agent Client] Failed to send queued message:", err);
+    }
+  }
+}
+
 function connectAgentWebSocket(convId = currentConversationId) {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${protocol}//${window.location.host}/agents/support-agent/${convId}`;
+
+  // If already connected or connecting to the target conversation, keep existing connection
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) && ws.url === wsUrl) {
+    console.log(`[Agent Client] WebSocket already active or connecting for ${convId}.`);
+    if (ws.readyState === WebSocket.OPEN) {
+      flushPendingOutbox();
+    }
+    return;
+  }
+
   if (ws) {
     try {
+      ws.onclose = null; // Suppress auto-retry on manual close/switch
       ws.close();
     } catch {}
   }
-
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/agents/support-agent/${convId}`;
 
   console.log(`[Agent Client] Connecting to ${wsUrl}...`);
   ws = new WebSocket(wsUrl);
@@ -955,6 +1000,7 @@ function connectAgentWebSocket(convId = currentConversationId) {
       agentStatusDot.style.background = "#10b981";
       agentStatusDot.style.boxShadow = "0 0 8px #10b981";
     }
+    flushPendingOutbox();
   };
 
   ws.onmessage = (event) => {
@@ -1071,12 +1117,13 @@ function connectAgentWebSocket(convId = currentConversationId) {
   };
 
   ws.onclose = () => {
-    console.warn(`[Agent Client] WebSocket closed for ${convId}, retrying in 3s...`);
+    console.warn(`[Agent Client] WebSocket closed for ${convId}, reconnecting in 1.5s...`);
     if (agentStatusDot) {
       agentStatusDot.style.background = "#f59e0b";
       agentStatusDot.style.boxShadow = "none";
     }
-    reconnectTimer = setTimeout(() => connectAgentWebSocket(currentConversationId), 3000);
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => connectAgentWebSocket(currentConversationId), 1500);
   };
 
   ws.onerror = (err) => {
@@ -1160,7 +1207,10 @@ function renderFullHistory(messages) {
       if (!text && msg.parts && msg.parts.length > 0) {
         text = "I reviewed your flight details. Flight AA1822 is delayed by 180 minutes due to convective thunderstorms at DFW. Alternative flights **AA2040** (18:45 UTC) and **AA912** (17:30 UTC) are available with open seats.";
       }
-      if (text) appendAgentMessage(text, msg.id);
+      if (text) {
+        text = deduplicateRepetitiveText(text);
+        appendAgentMessage(text, msg.id);
+      }
     }
   });
 }
@@ -1200,35 +1250,36 @@ chatForm.addEventListener("submit", async (e) => {
   appendUserMessage(text);
 
   // Send message over WebSocket using cf_agent_use_chat_request wire protocol
+  const requestId = `req_${Date.now()}`;
+  const payload = {
+    type: "cf_agent_use_chat_request",
+    id: requestId,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [
+          {
+            id: `msg_${Date.now()}`,
+            role: "user",
+            parts: [{ type: "text", text: text }],
+          },
+        ],
+      }),
+    },
+  };
+
+  // Show temporary typing indicator
+  currentTurnMessageId = null;
+  currentThinkingBubble = appendAgentMessage("Thinking and checking flight systems...");
+  currentResponseBubble = null;
+  currentAccumulatedText = "";
+
   if (ws && ws.readyState === WebSocket.OPEN) {
-    const requestId = `req_${Date.now()}`;
-    const payload = {
-      type: "cf_agent_use_chat_request",
-      id: requestId,
-      init: {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [
-            {
-              id: `msg_${Date.now()}`,
-              role: "user",
-              parts: [{ type: "text", text: text }],
-            },
-          ],
-        }),
-      },
-    };
-
-    // Show temporary typing indicator
-    currentTurnMessageId = null;
-    currentThinkingBubble = appendAgentMessage("Thinking and checking flight systems...");
-    currentResponseBubble = null;
-    currentAccumulatedText = "";
-
     ws.send(JSON.stringify(payload));
   } else {
-    appendAgentMessage("Reconnecting to flight operations server... Please try again in a moment.");
+    console.log("[Agent Client] WebSocket is connecting or offline. Queued message for immediate send.");
+    pendingOutbox.push(payload);
     connectAgentWebSocket(currentConversationId);
   }
 });

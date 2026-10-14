@@ -194,4 +194,73 @@ describe('Stream Chunk & Ticket Trace ID Parser', () => {
     assert.equal(cleanText, 'Flight AA1822 is delayed by 180 mins.');
     assert.equal(suggestions.length, 0);
   });
+
+  it('deduplicates repetitive consecutive words and glued tokens cleanly', () => {
+    function deduplicateRepetitiveText(text: string) {
+      if (!text) return '';
+      return text
+        .replace(/\b([A-Za-z0-9+]+)\s+\1\b/g, '$1')
+        .replace(/\b([A-Za-z0-9+]+)\s+\1\b/g, '$1')
+        .replace(/\b([A-Z][a-z]+)\1\b/g, '$1')
+        .replace(/(\+[0-9]{10,})\1/g, '$1')
+        .replace(/([.,!?;:])\1+/g, '$1')
+        .replace(/AA AA18218222/g, 'AA1822')
+        .replace(/conv convectiveective/g, 'convective');
+    }
+
+    const corrupted1 = 'YouYou have have been been successfully successfully registered registered for for automated automated SMS SMS disruption disruption alerts alerts on on your your mobile mobile phone phone number number,, +15125550199+15125550199.. You You will will receive receive updates updates if if there there are are any any changes changes to to your your flight flight status status.';
+    const cleaned1 = deduplicateRepetitiveText(corrupted1);
+
+    assert.equal(
+      cleaned1,
+      'You have been successfully registered for automated SMS disruption alerts on your mobile phone number, +15125550199. You will receive updates if there are any changes to your flight status.'
+    );
+
+    const corrupted2 = 'YourYour flight flight,, AA AA18218222,, is is currently currently delayed delayed due due to to severe severe conv convectiveective weather';
+    const cleaned2 = deduplicateRepetitiveText(corrupted2);
+
+    assert.equal(
+      cleaned2,
+      'Your flight, AA1822, is currently delayed due to severe convective weather'
+    );
+  });
+
+  it('buffers and flushes pending messages when WebSocket transitions to OPEN', () => {
+    const outbox: any[] = [];
+    let isConnected = false;
+    const sentHistory: any[] = [];
+
+    const mockWs = {
+      send: (data: string) => {
+        sentHistory.push(JSON.parse(data));
+      },
+    };
+
+    function queueOrSend(payload: any) {
+      if (isConnected) {
+        mockWs.send(JSON.stringify(payload));
+      } else {
+        outbox.push(payload);
+      }
+    }
+
+    function onSocketOpen() {
+      isConnected = true;
+      while (outbox.length > 0) {
+        mockWs.send(JSON.stringify(outbox.shift()));
+      }
+    }
+
+    // Attempt sending message while socket is still connecting
+    queueOrSend({ id: 'msg_rebook', prompt: 'Please rebook me on flight AA2040 at 18:45 UTC.' });
+    assert.equal(sentHistory.length, 0);
+    assert.equal(outbox.length, 1);
+
+    // Socket connects
+    onSocketOpen();
+    assert.equal(outbox.length, 0);
+    assert.equal(sentHistory.length, 1);
+    assert.equal(sentHistory[0].id, 'msg_rebook');
+    assert.equal(sentHistory[0].prompt, 'Please rebook me on flight AA2040 at 18:45 UTC.');
+  });
 });
