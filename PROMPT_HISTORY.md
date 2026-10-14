@@ -180,6 +180,27 @@ To prevent brittle implementation, the plan underwent two rounds of adversarial 
 
 ---
 
+### Prompt 4.5: Cloudflare Worker GitHub CI/CD Pipeline & D1 Schema/Seed Isolation
+**Prompt**:
+> *"okay i want this cloudflare worker deployed using github cicd. draft a plan for that."*  
+> Review feedback: *"this will seed the data on every ci. we do not want that. we can run the seed once. seeding does not even need to be a part of ci."*, *"we should use npx wrangler secret put <KEY>"*, *"dry run should not need actual api tokens"*, *"use npx wrangler deployments list"*, *"schema.sql still contain INSERT OR REPLACE"*.
+
+**Changes & Architectural Enhancements**:
+1. **D1 Schema vs. Scenario Seed Isolation (`schema.sql`, `seed.sql`, `package.json`)**:
+   - Stripped all `INSERT` statements from [`schema.sql`](file:///home/sid/.gemini/antigravity-ide/scratch/flight-support-agent/schema.sql) — making it strictly DDL (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`) so it can safely and idempotently run on every CI deployment without altering live data.
+   - Extracted one-time initial scenario data (airports, flights, passengers, bookings, conversations) into [`seed.sql`](file:///home/sid/.gemini/antigravity-ide/scratch/flight-support-agent/seed.sql).
+   - Added `npm run db:seed` (local) and `npm run db:seed:remote` (remote) to allow manual one-time seeding decoupled from CI.
+2. **KMS Secret Management via `wrangler secret put`**:
+   - Excluded third-party runtime secrets (`TWILIO_*`, `RESEND_*`) from GitHub Actions workflow files.
+   - Documented `npx wrangler secret put <KEY>` for encrypting secrets directly in Cloudflare Worker KMS.
+3. **Offline Quality Gate & Production Deploy Workflow (`.github/workflows/deploy.yml`)**:
+   - `test-and-verify`: Zero-secret offline quality gate on Node.js 22 LTS running `npm ci`, `tsc --noEmit`, all 26 automated unit tests (`npm test`), and `wrangler deploy --dry-run` with zero Cloudflare credentials.
+   - `deploy`: Release pipeline for `main` branch push/dispatch executing remote DDL schema synchronization (`wrangler d1 execute flight-support-db --remote --file=./schema.sql`), bundle deployment (`wrangler deploy`), and deployment audit verification (`wrangler deployments list`).
+4. **Documentation**:
+   - Documented the CI/CD architecture and one-time setup steps in [`README.md`](file:///home/sid/.gemini/antigravity-ide/scratch/flight-support-agent/README.md) and [`cicd_deployment_plan.md`](file:///home/sid/.gemini/antigravity-ide/brain/02b21afb-51ee-44c3-814a-8ea437c5c0f1/cicd_deployment_plan.md).
+
+---
+
 ## 5. Reflections on AI-Assisted Engineering
 
 1. **Iterative Verification Over Blind Acceptance**:

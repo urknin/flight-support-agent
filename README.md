@@ -114,6 +114,39 @@ Visit **`http://localhost:8787`** in your browser.
 
 ---
 
+## 🚀 CI/CD & Production Deployment (GitHub Actions)
+
+This project includes a production-grade GitHub Actions CI/CD pipeline in [`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml).
+
+### 1. One-Time Cloudflare Account Setup
+```bash
+# 1. Create the remote production D1 database
+npx wrangler d1 create flight-support-db
+
+# 2. Update wrangler.jsonc with the generated database UUID:
+# "d1_databases": [{ "binding": "DB", "database_name": "flight-support-db", "database_id": "<REAL-UUID>" }]
+
+# 3. Seed scenario data to the remote database ONCE (not run in CI)
+npm run db:seed:remote
+
+# 4. (Optional) Set runtime secrets in Cloudflare Worker KMS
+npx wrangler secret put TWILIO_ACCOUNT_SID
+npx wrangler secret put TWILIO_AUTH_TOKEN
+npx wrangler secret put TWILIO_FROM_NUMBER
+npx wrangler secret put RESEND_API_KEY
+```
+
+### 2. Configure GitHub Secrets
+In your GitHub Repository under **Settings → Secrets and variables → Actions**, add:
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with `Workers Scripts:Edit`, `D1:Edit`, `Durable Objects:Edit`, `Workflows:Edit`.
+- `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare Account ID.
+
+### 3. Automated Pipeline Behavior
+- **Quality Gate (PRs & Pushes)**: Runs offline without secrets. Executes `npm ci`, `postinstall` patch, `tsc --noEmit`, 26 unit tests (`npm test`), and `wrangler deploy --dry-run`.
+- **Production Release (Push to `main`)**: Runs clean DDL schema sync (`schema.sql` with zero `INSERT`s), deploys Worker, Durable Objects, Workflows, and static assets via `npx wrangler deploy`, and verifies via `npx wrangler deployments list`.
+
+---
+
 ## 🎮 Interactive Live Demo Walkthrough
 
 ### Scenario: Severe Thunderstorms at DFW Delaying Flight AA1822
@@ -147,7 +180,8 @@ flight-support-agent/
 ├── package.json               # Dependencies & scripts (agents, ai v7, workers-ai-provider, wrangler)
 ├── tsconfig.json              # TypeScript strict configuration
 ├── wrangler.jsonc             # Cloudflare bindings (AI, Durable Object, Workflow, D1, Assets)
-├── schema.sql                 # D1 relational schema & real-world seed data
+├── schema.sql                 # D1 relational schema (pure DDL tables & indexes, idempotent for CI)
+├── seed.sql                   # One-time scenario seed data (airports, flights, bookings, cases)
 ├── PROMPT_HISTORY.md          # Mandatory AI collaboration & prompt log
 ├── README.md                  # System documentation & evaluation guide
 ├── src/
