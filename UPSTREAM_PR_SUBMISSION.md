@@ -1,7 +1,8 @@
 # Upstream Pull Request: cloudflare/ai
 
 - **Target Repository:** [`cloudflare/ai`](https://github.com/cloudflare/ai)
-- **Pull Request URL:** [**cloudflare/ai#676**](https://github.com/cloudflare/ai/pull/676)
+- **Active Upstream PR:** [**cloudflare/ai#663**](https://github.com/cloudflare/ai/pull/663) *(Active PR by bootswithdefer addressing this issue)*
+- **Duplicate Reference:** [**cloudflare/ai#676**](https://github.com/cloudflare/ai/pull/676) *(Closed in favor of #663)*
 - **Target Package:** `packages/workers-ai-provider`
 - **Target Branch:** `main`
 - **Patch File:** [`patches/0001-fix-workers-ai-provider-streaming-token-duplication.patch`](./patches/0001-fix-workers-ai-provider-streaming-token-duplication.patch)

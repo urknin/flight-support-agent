@@ -239,8 +239,9 @@ To prevent brittle implementation, the plan underwent two rounds of adversarial 
 2. **Upstream PR Submission Guide (`UPSTREAM_PR_SUBMISSION.md`)**:
    - Created a comprehensive pull request package targeting `cloudflare/ai` on GitHub.
    - Includes root cause analysis, reproduction test case, proposed unified diff, and step-by-step submission commands via GitHub CLI (`gh pr create`).
-3. **Live Pull Request Opened**:
-   - Successfully created upstream PR: [**cloudflare/ai#676**](https://github.com/cloudflare/ai/pull/676).
+3. **Upstream PR Tracking**:
+   - Identified existing active PR [**cloudflare/ai#663**](https://github.com/cloudflare/ai/pull/663) addressing this exact dual-format duplication issue on Llama 3.3.
+   - Closed duplicate PR [**cloudflare/ai#676**](https://github.com/cloudflare/ai/pull/676) with attribution to #663.
 
 ---
 
