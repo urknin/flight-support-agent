@@ -7,6 +7,8 @@ let currentConversationId = sessionStorage.getItem("aerocare_conv_id") || "conv_
 let currentBookingRef = "SKY-8842";
 let currentCustomerId = "P-101";
 let currentCaseStatus = "ACTIVE";
+let currentCaseTitle = "";
+let currentResolutionSummary = "";
 let allPassengersList = [];
 let caseFilterStatus = "ALL";
 let ws = null;
@@ -215,6 +217,8 @@ async function loadConversation(convId, initialOpening = null) {
       currentBookingRef = conv.booking_ref || "SKY-8842";
       currentCustomerId = conv.customer_id;
       currentCaseStatus = conv.status;
+      currentCaseTitle = conv.title || "";
+      currentResolutionSummary = conv.resolution_summary || "";
 
       if (chatCaseTitle) chatCaseTitle.textContent = conv.title;
       if (chatCustomerTag) chatCustomerTag.textContent = `👤 ${conv.customer_name} (${conv.customer_id})`;
@@ -265,19 +269,38 @@ async function loadConversation(convId, initialOpening = null) {
     console.error("loadConversation error:", err);
   }
 
-  // Clear messages container and reconnect websocket to this unique conversation
-  if (messagesContainer) {
-    messagesContainer.innerHTML = "";
-  }
+  // Connect agent websocket for live turns
   connectAgentWebSocket(currentConversationId);
 
-  // If initial opening message was provided (e.g. from new case creation), render it
-  if (initialOpening) {
-    setTimeout(() => {
-      if (messagesContainer && messagesContainer.children.length === 0) {
-        appendAgentMessage(initialOpening);
+  // Fetch full conversation history from the Durable Object session
+  try {
+    const msgRes = await fetch(`/agents/support-agent/${convId}/get-messages`);
+    if (msgRes.ok) {
+      const history = await msgRes.json();
+      if (Array.isArray(history) && history.length > 0) {
+        renderFullHistory(history, true);
+      } else {
+        if (messagesContainer) {
+          messagesContainer.innerHTML = "";
+        }
+        if (initialOpening) {
+          appendAgentMessage(initialOpening);
+        } else if (currentCaseStatus === "RESOLVED") {
+          appendUserMessage(`Inquiry: ${currentCaseTitle || "Support Case"}`);
+          appendAgentMessage(
+            `This case has been resolved and closed.\n\n**Case Title:** ${currentCaseTitle}\n**Resolution Summary:** ${currentResolutionSummary || "Customer concern addressed successfully."}`,
+            null,
+            false
+          );
+        } else {
+          appendAgentMessage(
+            `Hello Alex, I'm your AeroCare Flight Support Assistant.\n\nI see your booking **${currentBookingRef || "SKY-8842"}** on flight **AA1822** from Dallas (DFW) to Chicago (ORD) is delayed by 180 minutes due to severe thunderstorms and an active FAA Ground Stop at DFW. Open seats are confirmed on flight **AA2040** (18:45 UTC). How can I assist you with rebooking?`
+          );
+        }
       }
-    }, 250);
+    }
+  } catch (err) {
+    console.error("Failed to load messages for", convId, err);
   }
 }
 
@@ -1146,7 +1169,7 @@ function appendUserMessage(text) {
   scrollToBottom();
 }
 
-function appendAgentMessage(text, messageId = null) {
+function appendAgentMessage(text, messageId = null, showActionCards = true) {
   const row = document.createElement("div");
   row.className = "message-row agent";
 
@@ -1156,11 +1179,11 @@ function appendAgentMessage(text, messageId = null) {
 
   const isTemporary = cleanText.includes("Thinking and checking") || cleanText.includes("Reconnecting");
   let finalSuggestions = suggestions;
-  if (!isTemporary && (!finalSuggestions || finalSuggestions.length === 0)) {
+  if (!isTemporary && showActionCards && (!finalSuggestions || finalSuggestions.length === 0)) {
     finalSuggestions = getFallbackSuggestions(cleanText);
   }
 
-  const cardsHtml = isTemporary ? "" : renderFollowupCardsHtml(finalSuggestions);
+  const cardsHtml = (isTemporary || !showActionCards) ? "" : renderFollowupCardsHtml(finalSuggestions);
 
   row.innerHTML = `
     <div class="message-avatar avatar-agent">AI</div>
@@ -1172,7 +1195,7 @@ function appendAgentMessage(text, messageId = null) {
   `;
   messagesContainer.appendChild(row);
   attachCopyHandlers(row);
-  if (finalSuggestions.length > 0 && !isTemporary) {
+  if (finalSuggestions.length > 0 && !isTemporary && showActionCards) {
     attachCardClickHandlers(row);
   }
   scrollToBottom();
@@ -1193,26 +1216,54 @@ function appendAlertMessage(title, body) {
   scrollToBottom();
 }
 
-function renderFullHistory(messages) {
-  // If there are already messages, don't overwrite if user is actively chatting
-  if (messagesContainer.children.length > 2) return;
+function renderFullHistory(messages, force = false) {
+  if (!messages || !Array.isArray(messages)) return;
+  // If there are already messages, don't overwrite if user is actively chatting (unless force=true on load)
+  if (!force && messagesContainer.children.length > 2) return;
 
   messagesContainer.innerHTML = "";
-  messages.forEach((msg) => {
+
+  // Identify the last assistant message index so action cards only render at the very end
+  let lastAssistantIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      lastAssistantIndex = i;
+      break;
+    }
+  }
+
+  messages.forEach((msg, idx) => {
     if (msg.role === "user") {
-      const text = msg.parts?.find((p) => p.type === "text")?.text || "";
+      const text = msg.parts?.filter((p) => p.type === "text").map((p) => p.text).join("\n") || "";
       if (text) appendUserMessage(text);
     } else if (msg.role === "assistant") {
-      let text = msg.parts?.find((p) => p.type === "text")?.text || "";
+      let text = msg.parts?.filter((p) => p.type === "text").map((p) => p.text).join("\n") || "";
       if (!text && msg.parts && msg.parts.length > 0) {
-        text = "I reviewed your flight details. Flight AA1822 is delayed by 180 minutes due to convective thunderstorms at DFW. Alternative flights **AA2040** (18:45 UTC) and **AA912** (17:30 UTC) are available with open seats.";
+        const toolPart = msg.parts.find((p) => p.toolName || (p.type && p.type.startsWith("tool-")));
+        if (toolPart) {
+          const tName = toolPart.toolName || toolPart.type.replace("tool-", "");
+          if (tName === "rebookPassengerFlight") {
+            const flight = toolPart.input?.newFlightNumber || "AA2040";
+            text = `✓ Confirmed rebooking on flight **${flight}**. Booking reference updated in flight operations.`;
+          } else if (tName === "subscribeToFlightAlerts") {
+            const recipient = toolPart.input?.recipient || "+15125550199";
+            const channel = (toolPart.input?.channel || "sms").toUpperCase();
+            text = `✓ Registered **${recipient}** for automated **${channel}** flight disruption alerts.`;
+          } else if (tName === "lookupFlightStatus" || tName === "lookupPassengerBooking") {
+            text = `I reviewed your flight operations status and booking itinerary.`;
+          } else {
+            text = `Flight operations tool executed: ${tName}.`;
+          }
+        }
       }
       if (text) {
         text = deduplicateRepetitiveText(text);
-        appendAgentMessage(text, msg.id);
+        const showCards = idx === lastAssistantIndex;
+        appendAgentMessage(text, msg.id, showCards);
       }
     }
   });
+  scrollToBottom();
 }
 
 function scrollToBottom() {

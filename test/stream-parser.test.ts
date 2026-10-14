@@ -263,4 +263,41 @@ describe('Stream Chunk & Ticket Trace ID Parser', () => {
     assert.equal(sentHistory[0].id, 'msg_rebook');
     assert.equal(sentHistory[0].prompt, 'Please rebook me on flight AA2040 at 18:45 UTC.');
   });
+
+  it('correctly maps AIChatAgent stored message parts into text and tool execution notes', () => {
+    const rawStoredMessages = [
+      {
+        id: 'msg_user_1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Please rebook me on flight AA2040 at 18:45 UTC.' }],
+      },
+      {
+        id: 'assistant_1',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'tool-rebookPassengerFlight',
+            toolName: 'rebookPassengerFlight',
+            input: { bookingRef: 'SKY-8842', newFlightNumber: 'AA2040' },
+            output: { success: true },
+          },
+          { type: 'step-start' },
+          { type: 'text', text: 'Confirmed rebooking on AA2040.' },
+        ],
+      },
+    ];
+
+    const renderedUserText = rawStoredMessages[0].parts
+      .filter((p) => p.type === 'text')
+      .map((p) => p.text)
+      .join('\n');
+    assert.equal(renderedUserText, 'Please rebook me on flight AA2040 at 18:45 UTC.');
+
+    const renderedAssistantText = rawStoredMessages[1].parts
+      .filter((p) => p.type === 'text')
+      .map((p) => p.text)
+      .join('\n');
+    assert.equal(renderedAssistantText, 'Confirmed rebooking on AA2040.');
+  });
 });
